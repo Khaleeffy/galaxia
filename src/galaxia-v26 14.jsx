@@ -1,0 +1,9442 @@
+import { useState, useEffect, useRef, useCallback } from "react";
+
+// ══════════════════════════════════════════════════════
+// AUDIO ENGINE
+// ══════════════════════════════════════════════════════
+const AudioEngine=(()=>{
+  let ctx=null,masterGain=null,musicGain=null,sfxGain=null,musicNodes=[],isPlaying=false,muted=false,musicVol=0.35,sfxVol=0.6;
+  function init(){
+    if(ctx)return;
+    ctx=new(window.AudioContext||window.webkitAudioContext)();
+    masterGain=ctx.createGain();masterGain.gain.value=1;
+    musicGain=ctx.createGain();musicGain.gain.value=musicVol;
+    sfxGain=ctx.createGain();sfxGain.gain.value=sfxVol;
+    musicGain.connect(masterGain);sfxGain.connect(masterGain);masterGain.connect(ctx.destination);
+  }
+  function startMusic(){
+    if(!ctx||isPlaying)return;
+    isPlaying=true;
+    // ── CINEMATIC SPACE OPERA — D Major progression: D - A - Bm - G ──
+    // Chord notes (Hz): D=146.83, A=110, Bm(D)=146.83, G=98
+    // We build 4 sustained pads, each playing the chord's notes simultaneously.
+    // Voice leading is implicit through frequency stacks per chord.
+    
+    // Foundation bass (sub octave, warm but not heavy) — alternates root of each chord
+    const bassRoots=[73.42,55,73.42,49]; // D2, A1, D2, G1 — gentle progression
+    let chordIdx=0;
+    const CHORD_DURATION=8; // seconds per chord
+    const bassOsc=ctx.createOscillator();
+    const bassGain=ctx.createGain();
+    const bassFilter=ctx.createBiquadFilter();
+    bassOsc.type='sine';
+    bassOsc.frequency.value=bassRoots[0];
+    bassFilter.type='lowpass';bassFilter.frequency.value=300;
+    bassGain.gain.value=0;
+    bassOsc.connect(bassFilter);bassFilter.connect(bassGain);bassGain.connect(musicGain);
+    bassOsc.start();
+    bassGain.gain.setTargetAtTime(0.07,ctx.currentTime+0.5,3);
+    musicNodes.push(bassOsc);
+    
+    // Schedule chord changes for the bass
+    const updateBass=()=>{
+      if(!isPlaying)return;
+      chordIdx=(chordIdx+1)%bassRoots.length;
+      bassOsc.frequency.setTargetAtTime(bassRoots[chordIdx],ctx.currentTime,0.8);
+      setTimeout(updateBass,CHORD_DURATION*1000);
+    };
+    setTimeout(updateBass,CHORD_DURATION*1000);
+    
+    // ── Lush orchestral pad layers — the "epic but soft" core ──
+    // Multiple detuned voices per chord tone create the cinematic warmth.
+    // Frequencies of D major triad spread across 2 octaves: D3, F#3, A3, D4, F#4, A4
+    const padFreqs=[146.83, 185.00, 220.00, 293.66, 369.99, 440.00];
+    padFreqs.forEach((freq,i)=>{
+      // Two slightly detuned oscillators per voice for richness
+      [-7,7].forEach((detune,j)=>{
+        const osc=ctx.createOscillator(),gain=ctx.createGain();
+        osc.type=j===0?'sine':'triangle';
+        osc.frequency.value=freq;
+        osc.detune.value=detune;
+        gain.gain.value=0;
+        osc.connect(gain);gain.connect(musicGain);
+        osc.start();
+        // Each layer fades in at a different time → builds up like a swelling orchestra
+        gain.gain.setTargetAtTime(0.012+(5-i)*0.003,ctx.currentTime+1+i*1.5,4);
+        // Slow LFO breathing
+        const lfo=ctx.createOscillator(),lfoG=ctx.createGain();
+        lfo.frequency.value=1/(15+i*4)+j*0.01; // 15-39 sec breathing cycles
+        lfoG.gain.value=0.005+i*0.001;
+        lfo.connect(lfoG);lfoG.connect(gain.gain);
+        lfo.start();
+        musicNodes.push(osc,lfo);
+      });
+    });
+    
+    // ── Soaring lead melody — long, wide-interval notes ──
+    // D major pentatonic + octave jumps for that "cosmic" vastness
+    let noteTime=ctx.currentTime+8;
+    const melodyNotes=[
+      587.33, // D5
+      880.00, // A5
+      739.99, // F#5
+      1174.66,// D6 — octave jump for epic
+      987.77, // B5
+      659.25, // E5
+      880.00, // A5
+      1108.73,// C#6
+    ];
+    let melIdx=0;
+    const playNote=()=>{
+      if(!isPlaying)return;
+      const freq=melodyNotes[melIdx%melodyNotes.length];
+      melIdx++;
+      // Two voices per note: main + octave-down for warmth
+      [freq,freq/2].forEach((f,vi)=>{
+        const osc=ctx.createOscillator(),gain=ctx.createGain();
+        osc.type='sine';osc.frequency.value=f;gain.gain.value=0;
+        osc.connect(gain);gain.connect(musicGain);
+        osc.start(noteTime);
+        // Long sustained note — slow attack, very long decay (epic feel)
+        const peakVol=vi===0?0.05:0.025;
+        gain.gain.setTargetAtTime(peakVol,noteTime+0.1,0.8);  // slow swell
+        gain.gain.setTargetAtTime(0,noteTime+3.5,1.5);        // long fade
+        osc.stop(noteTime+8);
+      });
+      // Notes every 4-7 seconds — patient, never rushed
+      noteTime+=4+Math.random()*3;
+      const delay=(noteTime-ctx.currentTime)*1000;
+      if(delay>0&&isPlaying)setTimeout(playNote,delay);
+    };
+    setTimeout(playNote,8000);
+    
+    // ── Crystalline shimmer — high sparkle like distant stars ──
+    [1760,2349,2637,3520].forEach((freq,i)=>{
+      const osc=ctx.createOscillator(),gain=ctx.createGain();
+      osc.type='sine';osc.frequency.value=freq;gain.gain.value=0;
+      const lfo=ctx.createOscillator(),lfoG=ctx.createGain();
+      // Each shimmer twinkles at a different rate
+      lfo.frequency.value=0.1+i*0.06;
+      lfoG.gain.value=0.0035;
+      lfo.connect(lfoG);lfoG.connect(gain.gain);
+      osc.connect(gain);gain.connect(musicGain);
+      osc.start();lfo.start();
+      // Subtle, never overpowering
+      gain.gain.setTargetAtTime(0.005,ctx.currentTime+5+i,6);
+      musicNodes.push(osc,lfo);
+    });
+    
+    // ── Distant "horn" swells — occasional epic accents ──
+    // A low brassy texture that swells in and out, every ~30-50 seconds
+    const playHorn=()=>{
+      if(!isPlaying)return;
+      const hornFreqs=[110,165]; // A2 + E3 — perfect 5th, classic "epic horn" interval
+      const startT=ctx.currentTime;
+      hornFreqs.forEach((hf,hi)=>{
+        const osc=ctx.createOscillator(),gain=ctx.createGain(),filter=ctx.createBiquadFilter();
+        osc.type='sawtooth';
+        osc.frequency.value=hf;
+        filter.type='lowpass';filter.frequency.value=600;filter.Q.value=2;
+        gain.gain.value=0;
+        osc.connect(filter);filter.connect(gain);gain.connect(musicGain);
+        osc.start(startT);
+        // Slow swell up, hold, fade down — total ~6 seconds
+        gain.gain.setTargetAtTime(0.025,startT+0.5,1.2);
+        gain.gain.setTargetAtTime(0,startT+4,1.5);
+        osc.stop(startT+8);
+      });
+      const nextDelay=30000+Math.random()*20000; // 30-50 sec between horn swells
+      if(isPlaying)setTimeout(playHorn,nextDelay);
+    };
+    setTimeout(playHorn,15000); // First horn at 15s
+  }
+  function stopMusic(){
+    isPlaying=false;
+    musicNodes.forEach(n=>{try{n.stop();}catch(e){}});
+    musicNodes=[];
+  }
+  function playClick(){
+    if(!ctx)return;
+    const osc=ctx.createOscillator(),gain=ctx.createGain();
+    osc.type='sine';osc.frequency.value=880;gain.gain.value=0.2;
+    osc.connect(gain);gain.connect(sfxGain);
+    osc.start();osc.stop(ctx.currentTime+0.04);
+    gain.gain.setTargetAtTime(0,ctx.currentTime,0.02);
+  }
+  function playBuildStart(){
+    if(!ctx)return;
+    const t=ctx.currentTime;
+    [220,330,440,550].forEach((freq,i)=>{
+      const osc=ctx.createOscillator(),gain=ctx.createGain();
+      osc.type='sawtooth';
+      osc.frequency.setValueAtTime(freq,t+i*0.06);
+      osc.frequency.exponentialRampToValueAtTime(freq*1.5,t+i*0.06+0.15);
+      gain.gain.setValueAtTime(0.12,t+i*0.06);
+      gain.gain.exponentialRampToValueAtTime(0.001,t+i*0.06+0.2);
+      osc.connect(gain);gain.connect(sfxGain);
+      osc.start(t+i*0.06);osc.stop(t+i*0.06+0.25);
+    });
+    const osc2=ctx.createOscillator(),g2=ctx.createGain();
+    osc2.type='triangle';osc2.frequency.setValueAtTime(80,t);
+    osc2.frequency.exponentialRampToValueAtTime(20,t+0.3);
+    g2.gain.setValueAtTime(0.35,t);g2.gain.exponentialRampToValueAtTime(0.001,t+0.3);
+    osc2.connect(g2);g2.connect(sfxGain);osc2.start(t);osc2.stop(t+0.35);
+  }
+  function playBuildComplete(){
+    if(!ctx)return;
+    const t=ctx.currentTime;
+    [523.25,659.25,783.99,1046.5].forEach((freq,i)=>{
+      const osc=ctx.createOscillator(),gain=ctx.createGain();
+      osc.type='triangle';osc.frequency.value=freq;gain.gain.value=0;
+      gain.gain.linearRampToValueAtTime(0.18,t+i*0.1+0.05);
+      gain.gain.exponentialRampToValueAtTime(0.001,t+i*0.1+0.6);
+      osc.connect(gain);gain.connect(sfxGain);
+      osc.start(t+i*0.1);osc.stop(t+i*0.1+0.7);
+    });
+    const osc2=ctx.createOscillator(),g2=ctx.createGain();
+    osc2.type='sine';osc2.frequency.value=2093;
+    g2.gain.setValueAtTime(0.08,t+0.3);g2.gain.exponentialRampToValueAtTime(0.001,t+0.8);
+    osc2.connect(g2);g2.connect(sfxGain);osc2.start(t+0.3);osc2.stop(t+0.9);
+  }
+  function playShipLaunch(){
+    if(!ctx)return;
+    const t=ctx.currentTime;
+    const bufSize=Math.floor(ctx.sampleRate*0.8);
+    const buffer=ctx.createBuffer(1,bufSize,ctx.sampleRate);
+    const data=buffer.getChannelData(0);
+    for(let i=0;i<bufSize;i++)data[i]=Math.random()*2-1;
+    const src=ctx.createBufferSource(),filter=ctx.createBiquadFilter(),gain=ctx.createGain();
+    src.buffer=buffer;filter.type='bandpass';
+    filter.frequency.setValueAtTime(200,t);filter.frequency.exponentialRampToValueAtTime(2000,t+0.8);
+    filter.Q.value=2;gain.gain.setValueAtTime(0.25,t);gain.gain.exponentialRampToValueAtTime(0.001,t+0.8);
+    src.connect(filter);filter.connect(gain);gain.connect(sfxGain);src.start(t);src.stop(t+0.85);
+    const osc=ctx.createOscillator(),og=ctx.createGain();
+    osc.type='sawtooth';
+    osc.frequency.setValueAtTime(80,t);osc.frequency.exponentialRampToValueAtTime(400,t+0.5);
+    og.gain.setValueAtTime(0.15,t);og.gain.exponentialRampToValueAtTime(0.001,t+0.6);
+    osc.connect(og);og.connect(sfxGain);osc.start(t);osc.stop(t+0.65);
+  }
+  function setMusicVol(v){musicVol=v;if(musicGain&&!muted)musicGain.gain.setTargetAtTime(v,ctx.currentTime,0.1);}
+  function setSfxVol(v){sfxVol=v;if(sfxGain&&!muted)sfxGain.gain.setTargetAtTime(v,ctx.currentTime,0.1);}
+  function setMuted(m){muted=m;if(!ctx)return;masterGain.gain.setTargetAtTime(m?0:1,ctx.currentTime,0.15);}
+  function getMuted(){return muted;}
+  function getMusicVol(){return musicVol;}
+  function getSfxVol(){return sfxVol;}
+  function resume(){if(ctx&&ctx.state==='suspended')ctx.resume();}
+  function play(fn){
+    init();
+    if(!ctx)return;
+    if(ctx.state==='suspended'){ctx.resume().then(()=>{try{fn();}catch(e){}});}
+    else if(ctx.state==='running'){try{fn();}catch(e){}}
+    else{setTimeout(()=>{if(ctx.state==='running')try{fn();}catch(e){}},200);}
+  }
+  function playSoftClick(){
+    if(!ctx)return;
+    const osc=ctx.createOscillator(),gain=ctx.createGain();
+    osc.type='sine';osc.frequency.value=660;gain.gain.value=0.08;
+    osc.connect(gain);gain.connect(sfxGain);
+    osc.start();osc.stop(ctx.currentTime+0.03);
+    gain.gain.setTargetAtTime(0,ctx.currentTime,0.015);
+  }
+  function safeClick(){play(playClick);}
+  function safeSoftClick(){play(playSoftClick);}
+  function safeBuildStart(){play(playBuildStart);}
+  function safeBuildComplete(){play(playBuildComplete);}
+  function safeShipLaunch(){play(playShipLaunch);}
+  return{init,startMusic,stopMusic,playClick,playBuildStart,playBuildComplete,playShipLaunch,safeClick,safeSoftClick,safeBuildStart,safeBuildComplete,safeShipLaunch,setMusicVol,setSfxVol,setMuted,getMuted,getMusicVol,getSfxVol,resume};
+})();
+
+const ZONE_IMAGES={
+  mountain:"data:image/webp;base64,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",
+  forest:"data:image/webp;base64,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",
+  volcano:"data:image/webp;base64,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",
+  ocean:"data:image/webp;base64,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",
+  coast:"data:image/webp;base64,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",
+  ice:"data:image/webp;base64,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",
+  desert:"data:image/webp;base64,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",
+  plain:"data:image/webp;base64,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",
+  swamp:"data:image/webp;base64,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",
+  tundra:"data:image/webp;base64,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",
+};
+const PLANET_MAP_BACKGROUND={};
+
+
+const K={users:"gx_users",session:"gx_session",state:uid=>"gx_state_"+uid};
+async function hashPw(p){const d=new TextEncoder().encode(p+"galaxia2024");const b=await crypto.subtle.digest("SHA-256",d);return Array.from(new Uint8Array(b)).map(x=>x.toString(16).padStart(2,"0")).join("");}
+const loadUsers=()=>{try{return JSON.parse(localStorage.getItem(K.users)||"{}");}catch{return{};}};
+const saveUsers=u=>{try{localStorage.setItem(K.users,JSON.stringify(u));}catch{}};
+const Auth={
+  async reg(e,p,n){const u=loadUsers(),k=e.toLowerCase().trim();if(u[k])return{ok:false,err:"Email déjà utilisé."};const id=Date.now().toString(36)+Math.random().toString(36).slice(2,7);u[k]={id,hash:await hashPw(p),name:n,email:k};saveUsers(u);return{ok:true,user:{id,email:k,name:n}};},
+  async login(e,p){const u=loadUsers(),k=e.toLowerCase().trim(),r=u[k];if(!r)return{ok:false,err:"Email introuvable."};if(await hashPw(p)!==r.hash)return{ok:false,err:"Mot de passe incorrect."};return{ok:true,user:{id:r.id,email:k,name:r.name}};},
+  saveSession:u=>{try{localStorage.setItem(K.session,JSON.stringify(u));}catch{}},
+  loadSession:()=>{try{return JSON.parse(localStorage.getItem(K.session));}catch{return null;}},
+  clearSession:()=>{try{localStorage.removeItem(K.session);}catch{}},
+};
+function rng(seed){let s=(seed|0)>>>0;return()=>{s=(s+0x6D2B79F5)>>>0;let t=Math.imul(s^(s>>>15),1|s);t=(t+Math.imul(t^(t>>>7),61|t))^t;return((t^(t>>>14))>>>0)/4294967296;};}
+function noise2d(seed){
+  const r=rng(seed),p=Array.from({length:256},(_,i)=>i);
+  for(let i=255;i>0;i--){const j=Math.floor(r()*(i+1));[p[i],p[j]]=[p[j],p[i]];}
+  const P=[...p,...p],G=[[1,1],[-1,1],[1,-1],[-1,-1],[1,0],[-1,0],[0,1],[0,-1]];
+  const f=t=>t*t*t*(t*(t*6-15)+10),lp=(a,b,t)=>a+(b-a)*t,dt=([a,b],x,y)=>a*x+b*y;
+  return(x,y)=>{const X=Math.floor(x)&255,Y=Math.floor(y)&255,xf=x-Math.floor(x),yf=y-Math.floor(y),u=f(xf),v=f(yf);return lp(lp(dt(G[P[P[X]+Y]&7],xf,yf),dt(G[P[P[X+1]+Y]&7],xf-1,yf),u),lp(dt(G[P[P[X]+Y+1]&7],xf,yf-1),dt(G[P[P[X+1]+Y+1]&7],xf-1,yf-1),u),v);};
+}
+const fbm=(n,x,y,o=6,lac=2.1,gain=0.5)=>{let v=0,a=0.5,f=1,m=0;for(let i=0;i<o;i++){v+=n(x*f,y*f)*a;m+=a;a*=gain;f*=lac;}return v/m;};
+// Cylindrical/seamless fbm: wraps naturally around theta (longitude in radians)
+// Single noise sample on (cos(theta), sin(theta)) projected points -> naturally periodic
+// Latitude variation is encoded by stretching/offsetting the sample point
+function cylFbm(nn,freq,latVal,oct,lac,gain,theta,phaseX,phaseY){
+  const k=freq/(2*Math.PI);
+  // Project longitude to a 2D circular path, modulated by latitude
+  // latVal is in [0, 2], so we offset along both axes using lat
+  const px=(phaseX||0);
+  const py=(phaseY||0);
+  // Radius grows with frequency so higher-freq details get more variation
+  const cx=Math.cos(theta)*k+px;
+  const cy=Math.sin(theta)*k+py;
+  // Use latVal as a secondary offset (linear in y direction for each axis)
+  return fbm(nn,cx+latVal*freq*0.3,cy+latVal*freq*0.3,oct||4,lac||2,gain||0.5);
+}
+const TYPES=["Tellurique","Gazeuse","Glaciale","Désertique","Océanique","Volcanique","Forestière"];
+const ATMOS=["Dense","Légère","Toxique","Respirable","Aucune","Tempétueuse"];
+const PRE=["Kar","Sol","Vel","Nyx","Eos","Zar","Thal","Mor","Ith","Pyx","Aur","Ceth"];
+const SUF=["ion","ara","ux","eth","is","on","ur","ax","el","ys","en","oth"];
+const ROM=["I","II","III","IV","V","VI","VII","VIII","IX","X"];
+const mkName=s=>{const r=rng(s*31337);return PRE[Math.floor(r()*PRE.length)]+SUF[Math.floor(r()*SUF.length)]+" "+ROM[Math.floor(r()*10)];}
+function mkP(gS,i,opts){
+  // opts: {isWild:true} → spawned as an outer-ring wild planet (larger orbit radius,
+  // different seed offset so natal & wild planets never share a seed).
+  const isWild=!!(opts&&opts.isWild);
+  // Seed offset for wild: use a completely distinct sequence (+500000 base)
+  // so changing wild count never shifts natal planets.
+  const s=gS+(isWild?500000+i*1009:i*997),r=rng(s),d=+(0.3+r()*4.7).toFixed(2),type=TYPES[Math.floor(r()*TYPES.length)];
+  // Water: correlated with type
+  const w=type==="Océanique"?60+Math.floor(r()*35):type==="Désertique"?Math.floor(r()*5):type==="Glaciale"?10+Math.floor(r()*30):type==="Volcanique"?Math.floor(r()*15):type==="Forestière"?30+Math.floor(r()*40):type==="Gazeuse"?Math.floor(r()*10):Math.floor(r()*70);
+  // Temperature: correlated with type (base) + distance modifier + randomness
+  const distMod=d<1.5?20:d>3?-30:0; // closer = warmer, farther = colder
+  let baseTemp;
+  switch(type){
+    case"Volcanique":baseTemp=180+r()*120;break; // always very hot: 180-300°C
+    case"Désertique":baseTemp=50+r()*60;break;   // hot: 50-110°C
+    case"Gazeuse":baseTemp=-80+r()*120;break;    // very variable: -80 to +40°C
+    case"Glaciale":baseTemp=-120+r()*60;break;   // always very cold: -120 to -60°C
+    case"Tellurique":baseTemp=-20+r()*50;break;  // Earth-like: -20 to +30°C
+    case"Océanique":baseTemp=-10+r()*40;break;   // temperate: -10 to +30°C
+    case"Forestière":baseTemp=-5+r()*35;break;   // mild: -5 to +30°C
+    default:baseTemp=-20+r()*60;
+  }
+  const temp=Math.round(baseTemp+distMod);
+  // Atmosphere: correlated with type
+  let atmos;
+  switch(type){
+    case"Volcanique":atmos=r()<0.7?"Toxique":"Dense";break;
+    case"Gazeuse":atmos=r()<0.6?"Dense":"Tempétueuse";break;
+    case"Glaciale":atmos=r()<0.4?"Légère":r()<0.7?"Aucune":"Dense";break;
+    case"Désertique":atmos=r()<0.4?"Légère":r()<0.7?"Aucune":"Dense";break;
+    case"Tellurique":atmos=r()<0.55?"Respirable":r()<0.8?"Légère":"Dense";break; // most likely habitable
+    case"Océanique":atmos=r()<0.45?"Respirable":r()<0.75?"Dense":"Légère";break;
+    case"Forestière":atmos=r()<0.65?"Respirable":r()<0.85?"Dense":"Légère";break;
+    default:atmos=ATMOS[Math.floor(r()*ATMOS.length)];
+  }
+  const hasRings=type==="Gazeuse"&&r()>0.4;
+  const colorVar=r();
+  // Orbit placement:
+  // - Natal planets occupy the inner ring: orbitRadius3d 4 to 22 (as before)
+  // - Wild planets live in the outer ring: orbitRadius3d 26 to 44 (well beyond natals)
+  // The outer ring is divided into "layers" so Frontier Days can spawn new batches further out.
+  const innerR3d=4+r()*18;
+  // For wild planets, space them on a wider ring. The "waveOffset" shifts each batch
+  // outward (set via opts.waveOffset in the caller, default 0).
+  const waveOff=(opts&&opts.waveOffset)||0;
+  const wildR3d=26+waveOff+r()*6;
+  const orbitRadius3d=isWild?wildR3d:innerR3d;
+  return{seed:s,i,name:mkName(s),type,dist:d,temp,light:Math.max(5,Math.round(100/(d*d)*(0.7+r()*0.6))),size:3000+Math.floor(r()*12000),water:w,atmos,moons:Math.floor(r()*r()*5),ringsUnlocked:false,moonsUnlocked:false,tilt:r()*40,clouds:type==="Gazeuse"?0:type==="Glaciale"?0.55:type==="Désertique"?0.08:0.3+r()*0.4,hasRings,ringTilt:r()*0.6-0.3,colorVar,orbitAngle:(i/50)*Math.PI*2+r()*0.3,orbitRadius:80+(i/50)*340,orbitRadius3d,orbitInc:r()*Math.PI*0.6-Math.PI*0.3,orbitAsc:r()*Math.PI*2,orbitAngle3d:r()*Math.PI*2,orbitSpeed:isWild?0.03+r()*0.08:0.08+r()*0.18,isWild};
+}
+const huid=u=>{let h=0;for(let i=0;i<u.length;i++)h=(Math.imul(31,h)+u.charCodeAt(i))|0;return Math.abs(h);};
+const slotOf=u=>{const h=huid(u);return{gSeed:Math.floor(h/50)*1000,idx:h%50};};
+const GC={Tellurique:["#3d6b4a","#5e9e6e"],Gazeuse:["#b86820","#e09040"],Glaciale:["#6aaac8","#9ad0e8"],Désertique:["#c09040","#e0b860"],Océanique:["#1850b8","#2870d8"],Volcanique:["#b02818","#d83828"],Forestière:["#286028","#389838"]};
+const gc=t=>GC[t]||["#667788","#99aabb"];
+const habOf=p=>{let s=0;if(p.temp>-20&&p.temp<60)s+=3;else if(p.temp>-50&&p.temp<100)s+=1;if(p.water>20&&p.water<80)s+=2;if(p.atmos==="Respirable")s+=3;else if(["Dense","Légère"].includes(p.atmos))s+=1;if(p.light>20&&p.light<80)s+=2;return{l:s>=10?"Paradisiaque":s>=8?"Habitable":s>=5?"Marginale":s>=2?"Hostile":"Inhospitalier",c:s>=10?"#7ae8a0":s>=8?"#40c870":s>=5?"#c0b030":s>=2?"#c06030":"#c03020",s:s};};
+const TERRAIN_TYPES={
+  coast:  {name:"Côte",     icon:"🏖️",bonuses:{deut:0.5,shipCost:0.15,qgStorage:0.10},                buildable:true},
+  plain:  {name:"Plaine",   icon:"🌾",bonuses:{crystal:0.2,deut:0.1,buildSpeed:0.15,shipCost:0.10,qgProdAll:0.05},buildable:true},
+  forest: {name:"Forêt",   icon:"🌲",bonuses:{crystal:0.5,buildSpeed:0.10,qgBuildCost:0.10},          buildable:true},
+  mountain:{name:"Montagne",icon:"⛰️",bonuses:{metal:0.5,buildSpeed:0.10,qgShipCost:0.05},            buildable:true},
+  volcano:{name:"Volcan",   icon:"🌋",bonuses:{metal:0.8,energy:0.30,qgEnergy:0.10},                  buildable:true},
+  desert: {name:"Désert",  icon:"🏜️",bonuses:{metal:0.3,energy:0.35,qgFleetSpeed:0.10},              buildable:true},
+  tundra: {name:"Toundra", icon:"🧊",bonuses:{deut:0.4,energy:0.20,qgDeutStorage:0.15},               buildable:true},
+  swamp:  {name:"Marais",  icon:"🌿",bonuses:{crystal:0.3,deut:0.2,qgCrystalProd:0.05},               buildable:true},
+};
+// Each planet type has exactly 8 buildable zones + a passive bonus
+// Passive bonus = compensation for less-optimal individual zone types
+const ZONE_POOL={
+  Tellurique: ["plain","plain","forest","mountain","coast","desert","volcano","forest"],
+  Gazeuse:    ["plain","plain","mountain","volcano","volcano","desert","plain","mountain"],
+  Glaciale:   ["tundra","tundra","plain","mountain","coast","tundra","mountain","plain"],
+  Désertique: ["desert","desert","desert","mountain","volcano","plain","desert","coast"],
+  Océanique:  ["coast","coast","coast","plain","forest","swamp","coast","plain"],
+  Volcanique: ["volcano","volcano","mountain","desert","plain","coast","volcano","mountain"],
+  Forestière: ["forest","forest","forest","plain","mountain","coast","swamp","forest"],
+};
+// Passive bonuses per planet type (applied globally, not per-zone)
+const PLANET_PASSIVE_BONUS={
+  Tellurique: {label:"Équilibrée",    metal:0.10,crystal:0.10,deut:0.10},
+  Gazeuse:    {label:"Énergie +30%",  energy:0.30},
+  Glaciale:   {label:"Deut +25%",     deut:0.25},
+  Désertique: {label:"Énergie +20%",  energy:0.20},
+  Océanique:  {label:"Deut +20%",     deut:0.20},
+  Volcanique: {label:"Métal +15%",    metal:0.15},
+  Forestière: {label:"Cristal +20%",  crystal:0.20},
+};
+const ZONE_NAMES_BY_TYPE={
+  plain:    ["Plaine d'Argos","Steppe de Veyrin","Prairies de Sol","Vallée d'Oren","Champs de Karn"],
+  forest:   ["Forêt de Ceth","Bois de Thalos","Sylve d'Auryn","Taïga de Vren","Grand Bois"],
+  mountain: ["Pics de Morax","Monts Nyxar","Cimes d'Ardel","Chaîne de Vesh","Sommets Gris"],
+  coast:    ["Côte d'Helyon","Rivage de Zhar","Baie d'Oryn","Littoral de Mael","Caps Brisés"],
+  ocean:    ["Mer d'Azur","Océan de Velkyr","Abysses de Thal","Grand Bleu","Eaux Noires"],
+  desert:   ["Désert d'Aur","Dunes de Kith","Sables de Veth","Plaine Aride","Étendue Dorée"],
+  volcano:  ["Volcans de Zar","Caldeira Rouge","Mont Pyra","Crêtes de Feu","Vallée des Flammes"],
+  tundra:   ["Toundra Glacée","Plaine du Givre","Étendues de Glace","Steppes Gelées","Terres Blanches"],
+  ice:      ["Banquise de Thul","Glacier d'Yphir","Champs de Glace","Mer Gelée","Pics de Cristal"],
+  swamp:    ["Marais de Vel","Marécages d'Orm","Fagnes d'Ankar","Boue de Syk","Fondrières"],
+};
+const ZONE_NAMES=["Plaine d'Argos","Forêt de Ceth","Pics de Morax","Côte d'Helyon","Vallée Noire","Désert d'Aur","Volcans de Zar","Toundra Glacée","Marais de Vel","Monts Nyxar","Grotte de Pyx","Estuaire Solian"];
+const CONT_COLORS={
+  Tellurique: ["#2d7a40","#4a8a28","#7a6030","#3a7a50","#6a5040"],
+  Gazeuse:    ["#9a6820","#7a4030","#aa8030","#8a5020","#6a4020"],
+  Glaciale:   ["#3a8aaa","#5aaaca","#2a7aaa","#6aaacc","#3a7a9a"],
+  Desertique: ["#aa8830","#9a6020","#cc9a40","#8a6020","#ccaa50"],
+  Oceanique:  ["#1a5aaa","#2a6acc","#1a4a9a","#3a7acc","#0a3a8a"],
+  Volcanique: ["#8a2010","#aa3010","#7a1010","#9a2020","#6a1010"],
+  Forestiere: ["#1a6a20","#2a8a30","#3a7a20","#1a5a10","#4a8a30"],
+};
+function darkenHex(hex,factor){
+  const h=hex.replace("#","");
+  const r=Math.max(0,Math.min(255,Math.round(parseInt(h.substr(0,2),16)*factor)));
+  const g=Math.max(0,Math.min(255,Math.round(parseInt(h.substr(2,2),16)*factor)));
+  const b=Math.max(0,Math.min(255,Math.round(parseInt(h.substr(4,2),16)*factor)));
+  return"#"+[r,g,b].map(v=>v.toString(16).padStart(2,"0")).join("");
+}
+function getContColors(t){
+  const base=(typeof gc==="function"?gc(t):null)||["#667788","#99aabb"];
+  const primary=base[0]||"#667788";
+  // Five progressively darker shades of the planet's primary color
+  return[
+    darkenHex(primary,0.40),
+    darkenHex(primary,0.28),
+    darkenHex(primary,0.52),
+    darkenHex(primary,0.35),
+    darkenHex(primary,0.22),
+  ];
+}
+// ──────────────────────────────────────────────────────
+// LANDMASS DETECTION (physical continents from texture)
+// ──────────────────────────────────────────────────────
+// Sample the planet's elevation grid, classify land/water, then flood-fill
+// to find connected landmasses. Returns sorted by size (largest first).
+// Uses the SAME noise pipeline as genSurfaceTexture so results match the visual.
+function detectLandmasses(planet){
+  const GW=192,GH=96; // 192x96 grid for detection (smoother continent edges)
+  if(!planet||!planet.seed||planet.type==="Gazeuse")return null;
+  const n=noise2d(planet.seed),n2=noise2d(planet.seed+11111);
+  const wl=planet.water/100;
+  // Build elevation grid
+  const grid=new Float32Array(GW*GH);
+  const samples=[];
+  for(let sy=0;sy<GH;sy++){
+    for(let sx=0;sx<GW;sx++){
+      const ts=(sx/GW)*Math.PI*2;
+      const lats=(sy/GH)*2;
+      const e1=cylFbm(n,.9,lats,7,2.0,0.52,ts);
+      const e2=cylFbm(n2,1.5,lats,5,2.0,0.5,ts,3,3);
+      const e3=cylFbm(n,2.2,lats,5,2.3,0.55,ts,17,17);
+      let c=e1*.6+e2*.4;
+      c=0.5+c*1.2;
+      c=Math.max(0,Math.min(1,c));
+      if(wl>0.5){c=c+Math.max(0,e3-.05)*.6;}
+      grid[sy*GW+sx]=c;
+      samples.push(c);
+    }
+  }
+  // Determine sea level using same percentile logic as rendering
+  samples.sort((a,b)=>a-b);
+  let targetLandPct;
+  if(planet.type==="Océanique")targetLandPct=Math.max(0.15,Math.min(0.35,1-wl));
+  else if(planet.type==="Glaciale")targetLandPct=Math.max(0.20,Math.min(0.45,1-wl));
+  else if(planet.type==="Volcanique")targetLandPct=Math.max(0.80,1-wl);
+  else targetLandPct=Math.max(0.25,1-wl);
+  const idx=Math.floor((1-targetLandPct)*samples.length);
+  const seaLevel=samples[Math.max(0,Math.min(samples.length-1,idx))];
+  // Classify cells as land
+  const isLand=new Uint8Array(GW*GH);
+  for(let i=0;i<GW*GH;i++)isLand[i]=grid[i]>=seaLevel?1:0;
+  // Morphological closing: dilate then erode to merge nearby islands into continents
+  function dilate(src){
+    const out=new Uint8Array(GW*GH);
+    for(let y=0;y<GH;y++){
+      for(let x=0;x<GW;x++){
+        const ii=y*GW+x;
+        if(src[ii]){out[ii]=1;continue;}
+        // Check 4-neighbors (with horizontal wrap)
+        const L=(x-1+GW)%GW,R=(x+1)%GW;
+        if(src[y*GW+L]||src[y*GW+R]||(y>0&&src[(y-1)*GW+x])||(y<GH-1&&src[(y+1)*GW+x])){
+          out[ii]=1;
+        }
+      }
+    }
+    return out;
+  }
+  function erode(src){
+    const out=new Uint8Array(GW*GH);
+    for(let y=0;y<GH;y++){
+      for(let x=0;x<GW;x++){
+        const ii=y*GW+x;
+        if(!src[ii]){out[ii]=0;continue;}
+        const L=(x-1+GW)%GW,R=(x+1)%GW;
+        if(src[y*GW+L]&&src[y*GW+R]&&(y===0||src[(y-1)*GW+x])&&(y===GH-1||src[(y+1)*GW+x])){
+          out[ii]=1;
+        }
+      }
+    }
+    return out;
+  }
+  // Closing: dilate twice then erode twice - merges nearby isolates into continents
+  let closed=dilate(dilate(isLand));
+  closed=erode(erode(closed));
+  // Keep a copy of the "true visible land" mask (before hole filling) — used to snap
+  // continent pins onto cells that actually appear as land in the rendered texture,
+  // not onto filled interior lakes.
+  const trueLand=new Uint8Array(GW*GH);
+  for(let i=0;i<GW*GH;i++)trueLand[i]=closed[i];
+  // Fill 4-connected water holes entirely surrounded by land (pinhole lakes)
+  // Only mark cells as water-component that reach the grid border (via BFS from edges)
+  const reachable=new Uint8Array(GW*GH);
+  const q=[];
+  // Seed from all water cells on top & bottom rows
+  for(let x=0;x<GW;x++){
+    if(!closed[x]){reachable[x]=1;q.push(x);}
+    const btm=(GH-1)*GW+x;
+    if(!closed[btm]){reachable[btm]=1;q.push(btm);}
+  }
+  while(q.length){
+    const cur=q.pop();
+    const cx=cur%GW,cy=(cur-cx)/GW;
+    const L=(cx-1+GW)%GW,R=(cx+1)%GW;
+    const neighbors=[cy*GW+L,cy*GW+R];
+    if(cy>0)neighbors.push((cy-1)*GW+cx);
+    if(cy<GH-1)neighbors.push((cy+1)*GW+cx);
+    for(const nii of neighbors){
+      if(!reachable[nii]&&!closed[nii]){
+        reachable[nii]=1;q.push(nii);
+      }
+    }
+  }
+  // Any water cell that is NOT reachable from grid edges is an interior hole -> fill it
+  for(let i=0;i<GW*GH;i++){
+    if(!closed[i]&&!reachable[i])closed[i]=1;
+  }
+  // Use closed mask as final isLand
+  for(let i=0;i<GW*GH;i++)isLand[i]=closed[i];
+  // Flood fill to find connected components
+  // Horizontal wrap: left edge connects to right edge (sphere topology)
+  // Vertical: poles clamp (no wrap)
+  const labels=new Int32Array(GW*GH); // 0 = unassigned/water
+  let nextLabel=1;
+  const components=[]; // {label, cells:[{x,y,elev}], cx3d, cy3d, cz3d, size}
+  for(let sy=0;sy<GH;sy++){
+    for(let sx=0;sx<GW;sx++){
+      const ii=sy*GW+sx;
+      if(!isLand[ii]||labels[ii])continue;
+      // BFS
+      const stack=[ii];
+      const cells=[];
+      labels[ii]=nextLabel;
+      while(stack.length){
+        const cur=stack.pop();
+        const cx=cur%GW,cy=(cur-cx)/GW;
+        cells.push({x:cx,y:cy,elev:grid[cur]});
+        // 4-neighborhood with horizontal wrap
+        const neigh=[
+          [(cx+1)%GW,cy],
+          [(cx-1+GW)%GW,cy],
+          [cx,cy-1],
+          [cx,cy+1]
+        ];
+        for(const[nx,ny]of neigh){
+          if(ny<0||ny>=GH)continue;
+          const nii=ny*GW+nx;
+          if(isLand[nii]&&!labels[nii]){
+            labels[nii]=nextLabel;
+            stack.push(nii);
+          }
+        }
+      }
+      // Compute 3D centroid (on unit sphere) from cell coords
+      let sumX=0,sumY=0,sumZ=0;
+      cells.forEach(({x,y})=>{
+        const th=(x/GW)*Math.PI*2;
+        const lt=(y/GH)*2; // lt in [0,2], convert to cy (cos of polar angle)
+        // sy/GH in [0,1] maps to lat [0..2]; spherical: phi = lt * PI / 2 doesn\'t quite work.
+        // Use equirectangular: sy/GH = phi/PI, so phi = (y/GH)*PI
+        const phi=(y/GH)*Math.PI;
+        const sp=Math.sin(phi),cp=Math.cos(phi);
+        sumX+=sp*Math.cos(th);
+        sumY+=cp;
+        sumZ+=sp*Math.sin(th);
+      });
+      const cLen=Math.max(1e-6,Math.sqrt(sumX*sumX+sumY*sumY+sumZ*sumZ));
+      components.push({
+        label:nextLabel,
+        cells:cells,
+        cx3d:sumX/cLen,cy3d:sumY/cLen,cz3d:sumZ/cLen,
+        size:cells.length
+      });
+      nextLabel++;
+    }
+  }
+  // Sort by size descending
+  components.sort((a,b)=>b.size-a.size);
+  return{gw:GW,gh:GH,seaLevel,components,labels,isLand,trueLand};
+}
+
+// Partition a single large landmass into N sub-regions using simple lat/lon k-means
+// Sub-regions are tagged with a shared parentId so we know they came from the same physical landmass
+function partitionLandmass(component,N,seedOffset){
+  const cells=component.cells;
+  if(cells.length===0)return[];
+  const parentId="p"+(seedOffset||0);
+  const rnd=rng((seedOffset||0)+1234);
+  const centroids=[];
+  for(let i=0;i<N;i++){
+    const pick=cells[Math.floor(rnd()*cells.length)];
+    centroids.push({x:pick.x,y:pick.y});
+  }
+  for(let it=0;it<8;it++){
+    const sumX=new Array(N).fill(0),sumY=new Array(N).fill(0),cnt=new Array(N).fill(0);
+    cells.forEach(c=>{
+      let best=0,bestD=Infinity;
+      for(let i=0;i<N;i++){
+        const dx=c.x-centroids[i].x,dy=c.y-centroids[i].y;
+        const d=dx*dx+dy*dy;
+        if(d<bestD){bestD=d;best=i;}
+      }
+      c._cluster=best;
+      sumX[best]+=c.x;sumY[best]+=c.y;cnt[best]++;
+    });
+    for(let i=0;i<N;i++){
+      if(cnt[i]>0){centroids[i].x=sumX[i]/cnt[i];centroids[i].y=sumY[i]/cnt[i];}
+    }
+  }
+  return centroids.map((c,i)=>{
+    const subCells=cells.filter(cl=>cl._cluster===i);
+    return{cells:subCells,size:subCells.length,parentId:parentId};
+  }).filter(s=>s.cells.length>0);
+}
+
+function generateContinents(planet){
+  if(!planet||!planet.seed)return[];
+  const r=rng(planet.seed*13337);
+  const colors=getContColors(planet.type);
+  const pool=ZONE_POOL[planet.type]||["plain","forest","mountain","coast","desert"];
+  const num=3;
+  // ── STEP 1: Detect physical landmasses from the planet's texture ──
+  const lm=detectLandmasses(planet);
+  let regions=[]; // array of {cells, cx3d, cy3d, cz3d, size, gw, gh}
+  if(lm && lm.components && lm.components.length>0){
+    const GW=lm.gw,GH=lm.gh;
+    // Take the 3 largest components. If fewer than 3, partition the largest.
+    let comps=lm.components.slice(0,num);
+    if(comps.length<num){
+      // Not enough separate landmasses: split the largest into sub-regions
+      const needed=num-comps.length;
+      const biggest=comps[0];
+      // Split biggest into (needed+1) pieces to replace it
+      const subs=partitionLandmass(biggest,needed+1,planet.seed);
+      // Recompute centroids for subs
+      const subsWithCentroids=subs.map(s=>{
+        let sumX=0,sumY=0,sumZ=0;
+        s.cells.forEach(({x,y})=>{
+          const th=(x/GW)*Math.PI*2;
+          const phi=(y/GH)*Math.PI;
+          const sp=Math.sin(phi),cp=Math.cos(phi);
+          sumX+=sp*Math.cos(th);sumY+=cp;sumZ+=sp*Math.sin(th);
+        });
+        const L=Math.max(1e-6,Math.sqrt(sumX*sumX+sumY*sumY+sumZ*sumZ));
+        return{cells:s.cells,cx3d:sumX/L,cy3d:sumY/L,cz3d:sumZ/L,size:s.cells.length};
+      });
+      // Propagate parentId from partition subs
+      const partitionedParentId="partitioned_"+planet.seed;
+      const subsTagged=subsWithCentroids.map(s=>({...s,parentId:partitionedParentId}));
+      comps=subsTagged.concat(comps.slice(1));
+      comps.sort((a,b)=>b.size-a.size);
+      comps=comps.slice(0,num);
+    }
+    // Decorate each component with GW/GH for later use (overlay rendering)
+    const trueLandMask=lm.trueLand; // cells that appear as land in the rendered texture
+    regions=comps.map(c=>{
+      // ── SNAP CENTROID TO VISIBLE LAND ──
+      // The geometric centroid of a concave/crescent-shaped continent can fall
+      // in an interior lake (filled during detection to unify the continent).
+      // We snap to the cell that is:
+      // 1) part of this continent
+      // 2) visible as actual land (trueLand[i] = 1, i.e. not a filled lake)
+      // 3) closest to the geometric centroid in 3D space
+      if(c.cells&&c.cells.length>0){
+        let bestCell=null,bestDist=Infinity;
+        c.cells.forEach(({x,y})=>{
+          // Filter: only visible land cells (not interior-lake fills)
+          if(trueLandMask&&!trueLandMask[y*GW+x])return;
+          const th=(x/GW)*Math.PI*2;
+          const phi=(y/GH)*Math.PI;
+          const sp=Math.sin(phi),cp=Math.cos(phi);
+          const px=sp*Math.cos(th),py=cp,pz=sp*Math.sin(th);
+          // Squared distance from geometric centroid (on unit sphere)
+          const dx=px-c.cx3d,dy=py-c.cy3d,dz=pz-c.cz3d;
+          const d=dx*dx+dy*dy+dz*dz;
+          if(d<bestDist){bestDist=d;bestCell={px,py,pz};}
+        });
+        // Fallback: if no visible-land cell was found (shouldn't happen), use any cell
+        if(!bestCell){
+          c.cells.forEach(({x,y})=>{
+            const th=(x/GW)*Math.PI*2;
+            const phi=(y/GH)*Math.PI;
+            const sp=Math.sin(phi),cp=Math.cos(phi);
+            const px=sp*Math.cos(th),py=cp,pz=sp*Math.sin(th);
+            const dx=px-c.cx3d,dy=py-c.cy3d,dz=pz-c.cz3d;
+            const d=dx*dx+dy*dy+dz*dz;
+            if(d<bestDist){bestDist=d;bestCell={px,py,pz};}
+          });
+        }
+        if(bestCell){
+          c={...c,cx3d:bestCell.px,cy3d:bestCell.py,cz3d:bestCell.pz};
+        }
+      }
+      return{...c,gw:GW,gh:GH};
+    });
+  }
+  // Fallback: if still no regions (e.g. Gas giant somehow, or detection failed),
+  // use old-style abstract placement
+  if(regions.length===0){
+    const latBands=[-0.35+r()*0.25,0.05+r()*0.25,0.45+r()*0.25];
+    for(let k=latBands.length-1;k>0;k--){const j=Math.floor(r()*(k+1));const tmp=latBands[k];latBands[k]=latBands[j];latBands[j]=tmp;}
+    const lonOffset=r()*Math.PI*2;
+    for(let i=0;i<num;i++){
+      const theta=lonOffset+(i/num)*Math.PI*2+(r()-0.5)*0.4;
+      const cy=latBands[i];
+      const phi=Math.acos(Math.max(-1,Math.min(1,cy)));
+      const cx=Math.sin(phi)*Math.cos(theta);
+      const cz=Math.sin(phi)*Math.sin(theta);
+      regions.push({cells:[],cx3d:cx,cy3d:cy,cz3d:cz,size:1,gw:96,gh:48,_fallback:true});
+    }
+  }
+  // Guarantee exactly `num` regions
+  while(regions.length<num){regions.push(regions[regions.length-1]);}
+  regions=regions.slice(0,num);
+  // Sort by size descending so index 0=biggest, 2=smallest
+  regions.sort((a,b)=>b.size-a.size);
+  return regions.map((region,ci)=>{
+    // 3/3/2 distribution: smallest (index 2) gets 2 zones, others get 3
+    const nZones=ci===num-1?2:3;
+    const cx=region.cx3d,cy=region.cy3d,cz=region.cz3d;
+    const phi=Math.acos(Math.max(-1,Math.min(1,cy)));
+    const theta=Math.atan2(cz,cx);
+    // Compute approximate "size" metric for overlay rendering (0..1 scale)
+    const relSize=region.cells.length>0?Math.min(1,region.cells.length/(region.gw*region.gh*0.15)):0.4;
+    // Build a shape: if we have cells, use their boundary; else use a procedural shape
+    let shape;
+    if(region.cells&&region.cells.length>0&&!region._fallback){
+      // Extract the outline: use the cells to build a point cloud,
+      // which the overlay renderer will paint via cell fill (not shape)
+      shape=null; // null -> overlay uses cells instead
+    }else{
+      const nPts=22+Math.floor(r()*6);
+      const phase1=r()*Math.PI*2,phase2=r()*Math.PI*2,phase3=r()*Math.PI*2;
+      shape=Array.from({length:nPts},(_,p)=>{
+        const angle=(p/nPts)*Math.PI*2;
+        const variation=0.18*Math.sin(angle*2+phase1)+0.10*Math.sin(angle*3+phase2)+0.06*Math.sin(angle*5+phase3)+(r()-0.5)*0.08;
+        return{a:angle+(r()-0.5)*0.15,r:0.85+variation};
+      });
+    }
+    const size=0.30+r()*0.08; // kept for legacy compatibility
+    // Slot positions to avoid overlap
+    // For 3 zones: TopR/BL/BC or TopL/BR/BC (mirrored based on flip)
+    // For 2 zones: TopR/BL or TopL/BR
+    // For 1 zone: center
+    const flip=r()<0.5;
+    // Layouts for different zone counts, well-spaced to avoid overlap
+    const slots4=flip?[
+      {mapX:0.22,mapY:0.25}, // top left
+      {mapX:0.78,mapY:0.25}, // top right
+      {mapX:0.22,mapY:0.75}, // bottom left
+      {mapX:0.78,mapY:0.75}, // bottom right
+    ]:[
+      {mapX:0.78,mapY:0.25}, // top right
+      {mapX:0.22,mapY:0.25}, // top left
+      {mapX:0.78,mapY:0.75}, // bottom right
+      {mapX:0.22,mapY:0.75}, // bottom left
+    ];
+    const slots3=flip?[
+      {mapX:0.50,mapY:0.24}, // top center
+      {mapX:0.20,mapY:0.76}, // bottom left
+      {mapX:0.80,mapY:0.76}, // bottom right
+    ]:[
+      {mapX:0.50,mapY:0.24}, // top center
+      {mapX:0.80,mapY:0.76}, // bottom right
+      {mapX:0.20,mapY:0.76}, // bottom left
+    ];
+    const slots2=flip?[
+      {mapX:0.28,mapY:0.50}, // left
+      {mapX:0.72,mapY:0.50}, // right
+    ]:[
+      {mapX:0.72,mapY:0.50}, // right
+      {mapX:0.28,mapY:0.50}, // left
+    ];
+    const slots1=[{mapX:0.5,mapY:0.5}];
+    const slots=nZones===4?slots4:nZones===3?slots3:nZones===2?slots2:slots1;
+
+    // Build a shuffled list of unique terrain types for this continent
+    const uniquePool=Array.from(new Set(pool));
+    // Fisher-Yates shuffle using our seeded rng
+    for(let k=uniquePool.length-1;k>0;k--){
+      const j=Math.floor(r()*(k+1));
+      const tmp=uniquePool[k];uniquePool[k]=uniquePool[j];uniquePool[j]=tmp;
+    }
+    // If we need more zones than unique types, fall back to the full pool for extras
+    const zones=Array.from({length:nZones},(_,zi)=>{
+      const type=zi<uniquePool.length?uniquePool[zi]:pool[Math.floor(r()*pool.length)];
+      const terrain=TERRAIN_TYPES[type]||TERRAIN_TYPES.plain;
+      // Distribute zones EVENLY around continent centroid to avoid overlap.
+      // Each zone gets an angular slot + small jitter, and a fixed minimum radius.
+      const angleSlot=(zi/nZones)*Math.PI*2+r()*0.3; // evenly spaced + small jitter
+      const radius=0.18+r()*0.08; // minimum radius so zones don't cluster at center
+      const dp=radius,dt=angleSlot;
+      const latOffset=(zi-(nZones-1)/2)*0.12+(r()-0.5)*0.08; // stagger in latitude too
+      const lx2=cx+Math.cos(dt)*dp,ly2=cy+latOffset,lz2=cz+Math.sin(dt)*dp;
+      const len=Math.sqrt(lx2*lx2+ly2*ly2+lz2*lz2);
+      const slot=slots[zi]||{mapX:0.5,mapY:0.5};
+      // Small random jitter for natural look while keeping zones separated
+      const jitter=0.015;
+      const namePool=ZONE_NAMES_BY_TYPE[type]||ZONE_NAMES;return{id:ci*10+zi,name:namePool[(ci*4+zi)%namePool.length],type,terrain,
+        lx:lx2/len,ly:ly2/len,lz:lz2/len,
+        mapX:slot.mapX+(r()-0.5)*jitter,
+        mapY:slot.mapY+(r()-0.5)*jitter,
+        building:null};
+    });
+    return{id:ci,name:["Alpha","Beta","Gamma"][ci],
+      cx:cx,cy:cy,cz:cz,phi:phi,theta:theta,
+      size:relSize,shape,cells:region.cells,gw:region.gw,gh:region.gh,
+      parentId:region.parentId,
+      color:colors[ci%colors.length],zones};
+  });
+}
+
+const CONTINENT_VERSION = 7; // v7: pins snap to *visible* land cells (not filled interior lakes)
+function migrateToContinents(state, planet) {
+  // If already on current version, keep as-is
+  if (state.continents && state.continentVersion === CONTINENT_VERSION) return state;
+  // Collect existing buildings to preserve them across regeneration
+  const existingBuildings = [];
+  if (state.continents) {
+    state.continents.forEach(c => c.zones.forEach(z => {
+      if (z.building) existingBuildings.push({ type: z.type, building: z.building });
+    }));
+  } else if (state.zones) {
+    state.zones.forEach(z => { if (z.building) existingBuildings.push({ type: z.type, building: z.building }); });
+  }
+  // Regenerate continents with the current algorithm
+  const continents = generateContinents(planet);
+  // Build a flat pool of all zones available for placement
+  const allZones = continents.flatMap(c => c.zones);
+  // Transfer building placements with fallback chain:
+  // 1) prefer matching terrain type
+  // 2) then any free zone (no terrain.buildable check — zones all accept buildings)
+  existingBuildings.forEach(({ type, building }) => {
+    let target = allZones.find(z => z.type === type && !z.building);
+    if (!target) target = allZones.find(z => !z.building);
+    if (target) target.building = building;
+    // If still no room (shouldn't happen since we have 8 zones per planet), silently skip
+  });
+  return { ...state, continents, continentVersion: CONTINENT_VERSION, zones: continents.flatMap(c => c.zones) };
+}
+
+// ──────────────────────────────────────────────────────
+// CONTINENT MAP 2D
+// ──────────────────────────────────────────────────────
+function drawTerrainCell(ctx, x, y, r2, type) {
+  const vis={bg:"#1a3010",fg:"#3a5a20"};
+  // Base fill
+  const g = ctx.createRadialGradient(x,y,0,x,y,r2);
+  g.addColorStop(0, vis.fg+"ee");
+  g.addColorStop(1, vis.bg+"aa");
+  ctx.beginPath(); ctx.arc(x,y,r2,0,Math.PI*2);
+  ctx.fillStyle = g; ctx.fill();
+  // Relief decoration
+  ctx.save(); ctx.clip();
+  if (type === "mountain" || type === "volcano") {
+    // Draw triangle peaks
+    const c = type === "volcano" ? "#cc3300" : "#888888";
+    for (let i=0;i<3;i++) {
+      const ax = x+(i-1)*r2*0.55, ay = y+r2*0.3;
+      const h = r2*(0.6+i*0.1);
+      ctx.beginPath();
+      ctx.moveTo(ax-r2*0.28, ay); ctx.lineTo(ax, ay-h); ctx.lineTo(ax+r2*0.28, ay);
+      ctx.fillStyle = i===1&&type==="volcano" ? "#ff4400aa" : c+"cc";
+      ctx.fill();
+      // Snow cap
+      if (type==="mountain") {
+        ctx.beginPath();
+        ctx.moveTo(ax-r2*0.1, ay-h*0.72); ctx.lineTo(ax, ay-h); ctx.lineTo(ax+r2*0.1, ay-h*0.72);
+        ctx.fillStyle = "#eeeeff"; ctx.fill();
+      }
+    }
+    if (type==="volcano") {
+      // Lava glow
+      const lg = ctx.createRadialGradient(x,y-r2*0.1,2,x,y-r2*0.1,r2*0.3);
+      lg.addColorStop(0,"#ff660088"); lg.addColorStop(1,"transparent");
+      ctx.fillStyle=lg; ctx.beginPath(); ctx.arc(x,y-r2*0.1,r2*0.3,0,Math.PI*2); ctx.fill();
+    }
+  } else if (type==="forest") {
+    // Tree circles
+    const treeColor = "#1a6a1a";
+    [[0,-0.45],[0.35,0.1],[-0.35,0.1],[0.18,-0.18],[-0.18,-0.18]].forEach(([dx,dy])=>{
+      ctx.beginPath(); ctx.arc(x+dx*r2,y+dy*r2,r2*0.22,0,Math.PI*2);
+      ctx.fillStyle=treeColor+"cc"; ctx.fill();
+    });
+  } else if (type==="ocean" || type==="coast") {
+    // Wave lines
+    ctx.strokeStyle = "#4a8acc55"; ctx.lineWidth=1.5;
+    for (let w=0;w<3;w++) {
+      ctx.beginPath();
+      const wy = y-r2*0.2+w*r2*0.18;
+      ctx.moveTo(x-r2*0.6, wy);
+      ctx.bezierCurveTo(x-r2*0.2, wy-r2*0.08, x+r2*0.2, wy+r2*0.08, x+r2*0.6, wy);
+      ctx.stroke();
+    }
+  } else if (type==="desert") {
+    // Dune curves
+    ctx.strokeStyle="#cc990044"; ctx.lineWidth=2;
+    for (let d=0;d<2;d++) {
+      ctx.beginPath();
+      ctx.ellipse(x+(d-0.5)*r2*0.4, y+r2*0.1, r2*0.5, r2*0.2, 0.2, 0, Math.PI);
+      ctx.stroke();
+    }
+  } else if (type==="ice") {
+    // Snowflake lines
+    ctx.strokeStyle="#aaddff88"; ctx.lineWidth=1.5;
+    for (let a=0;a<6;a++) {
+      const ang = a*Math.PI/3;
+      ctx.beginPath();
+      ctx.moveTo(x,y);
+      ctx.lineTo(x+Math.cos(ang)*r2*0.5, y+Math.sin(ang)*r2*0.5);
+      ctx.stroke();
+    }
+  } else if (type==="plain") {
+    // Grass dots
+    ctx.fillStyle="#3a9a3a66";
+    for(let i=0;i<8;i++) {
+      const gx=x+(Math.cos(i*0.8)*r2*0.5), gy=y+(Math.sin(i*1.3)*r2*0.4);
+      ctx.beginPath(); ctx.arc(gx,gy,r2*0.07,0,Math.PI*2); ctx.fill();
+    }
+  }
+  ctx.restore();
+}
+
+const _mapBgCache={};
+
+// ──────────────────────────────────────────────────────
+// Mini 3D building renderer — used inside zone cards
+// Shows a small spinning/animated version of the building with all its animations
+// ──────────────────────────────────────────────────────
+function makeBuildingGroup(T,buildingId,lv,underConstruction,progress){
+  const g=new T.Group();
+  const s=0.055+lv*0.008; // base scale, grows with level
+  const add=(mesh,pos,rot)=>{
+    if(pos)mesh.position.set(pos[0],pos[1],pos[2]);
+    if(rot)mesh.rotation.set(rot[0],rot[1],rot[2]);
+    g.add(mesh);return mesh;
+  };
+  const mesh3=(geo,col,opts={})=>new T.Mesh(geo,new T.MeshPhongMaterial({color:col,shininess:opts.shine||30,flatShading:!!opts.flat,...(opts.emit?{emissive:new T.Color(opts.emit),emissiveIntensity:opts.emitI||0.4}:{})}));
+  const basic3=(geo,col,opts={})=>new T.Mesh(geo,new T.MeshBasicMaterial({color:col,transparent:!!opts.tr,opacity:opts.op||1,side:opts.back?T.BackSide:T.FrontSide,blending:opts.add?T.AdditiveBlending:T.NormalBlending,depthWrite:!opts.add}));
+  // ── SHARED: Foundation platform (base pad) under every building ──
+  // Gives buildings a sense of being "installed" on the planet surface.
+  const padRadius=s*1.55;
+  // Outer metallic ring
+  add(mesh3(new T.CylinderGeometry(padRadius,padRadius*1.08,.008,24),0x2a3540,{shine:60}),[0,.001,0]);
+  // Inner darker pad
+  add(mesh3(new T.CylinderGeometry(padRadius*0.95,padRadius*0.95,.005,24),0x1a2230,{shine:40}),[0,.006,0]);
+  // Glowing rim LEDs (thin torus that pulses)
+  const rimLEDs=basic3(new T.TorusGeometry(padRadius*0.98,.002,4,48),0x44aaff,{tr:true,op:.7,add:true});
+  rimLEDs.rotation.x=Math.PI/2;
+  rimLEDs.position.y=.01;
+  g.add(rimLEDs);
+  // Cardinal indicator dots (4 small LEDs at N/E/S/W)
+  const cardinalLEDs=[];
+  for(let ci=0;ci<4;ci++){
+    const a=ci*Math.PI/2;
+    const led=basic3(new T.SphereGeometry(.004,5,5),0x66ccff,{tr:true,op:.9,add:true});
+    led.position.set(Math.cos(a)*padRadius*0.98,.013,Math.sin(a)*padRadius*0.98);
+    g.add(led);
+    cardinalLEDs.push({mesh:led,phase:ci*Math.PI/2});
+  }
+  // Store refs for animation
+  g.userData._baseLEDs={rim:rimLEDs,cardinals:cardinalLEDs};
+  // ── SHARED: Particle system helper ──
+  // Spawns N particles that rise (smoke) or fall/burst (sparks) from a origin.
+  // Each particle gets: mesh, birthTime, lifetime, velocity, color fade.
+  const particleSystems=[];
+  const makeParticles=(opts)=>{
+    // opts: {count, origin:[x,y,z], radius, upward, spreadXZ, color, size, lifetime, interval, mode, emissive}
+    const sys={opts,particles:[],lastSpawn:0};
+    for(let i=0;i<opts.count;i++){
+      const geo=opts.mode==="spark"?new T.OctahedronGeometry(opts.size):new T.SphereGeometry(opts.size,4,4);
+      const mat=new T.MeshBasicMaterial({color:opts.color,transparent:true,opacity:0,blending:T.AdditiveBlending,depthWrite:false});
+      const p=new T.Mesh(geo,mat);
+      p.visible=false;
+      g.add(p);
+      sys.particles.push({mesh:p,born:-99,life:0,vx:0,vy:0,vz:0});
+    }
+    particleSystems.push(sys);
+    return sys;
+  };
+  g.userData._particles=particleSystems;
+
+  if(buildingId==="qg"){
+    // ── QUARTIER GÉNÉRAL ──
+    const qgs=s*1.6;
+    // Foundation ring
+    add(mesh3(new T.CylinderGeometry(qgs*1.1,qgs*1.2,.012,16),0x334455),[0,.006,0]);
+    // Main dome
+    const dome=mesh3(new T.SphereGeometry(qgs,20,12,0,Math.PI*2,0,Math.PI/2),0x1a2f4a,{emit:0x0a1a33,emitI:.3,shine:80});
+    dome.position.y=.012;g.add(dome);
+    // Dome frame ribs (3 rings at different latitudes)
+    [.35,.6,.82].forEach(t2=>{
+      const r=Math.cos(Math.asin(t2))*qgs,h=t2*qgs+.012;
+      add(basic3(new T.TorusGeometry(r,.003,5,32),0x4488bb,{tr:true,op:.7}),[0,h,0],[Math.PI/2,0,0]);
+    });
+    // Central spire
+    add(mesh3(new T.CylinderGeometry(.003,.007,qgs*.9,5),0x6699bb),[0,qgs+.012,0]);
+    // Beacon on spire
+    const beacon=basic3(new T.SphereGeometry(.01,6,6),0x44ddff,{tr:true,op:.8,add:true});
+    add(beacon,[0,qgs*1.95,0]);
+    // 4 pods around base
+    for(let p=0;p<4;p++){
+      const a=p*Math.PI/2,px=Math.cos(a)*qgs*.88,pz=Math.sin(a)*qgs*.88;
+      add(mesh3(new T.BoxGeometry(qgs*.32,qgs*.22,qgs*.32),0x2a3d55),[px,qgs*.11,pz]);
+      // Pod window
+      const win=basic3(new T.PlaneGeometry(qgs*.12,qgs*.08),0x44aaff,{tr:true,op:.8,add:true});
+      win.position.set(px+Math.cos(a)*qgs*.17,qgs*.14,pz+Math.sin(a)*qgs*.17);
+      win.rotation.y=-a;g.add(win);
+    }
+    // Connecting corridors
+    for(let c=0;c<4;c++){
+      const a=c*Math.PI/2+Math.PI/4,len=qgs*.55;
+      const cor=mesh3(new T.BoxGeometry(len,.025,qgs*.06),0x223344);
+      cor.position.set(Math.cos(a)*qgs*.65,.008,Math.sin(a)*qgs*.65);
+      cor.rotation.y=-a;g.add(cor);
+    }
+    // Energy ring
+    const ering=basic3(new T.TorusGeometry(qgs*1.05,.004,5,48),0x2299ff,{tr:true,op:.6,add:true});
+    ering.rotation.x=Math.PI/2;ering.position.y=.01;g.add(ering);
+    // Orbiting drone (level 3+)
+    let drone=null;
+    if(lv>=3){
+      drone=mesh3(new T.OctahedronGeometry(qgs*.15),0x3388cc,{emit:0x1144aa,emitI:.5});
+      g.add(drone);
+    }
+    // Rotating radar/antenna dish on top (communication scanner)
+    const antennaGroup=new T.Group();
+    antennaGroup.position.set(0,qgs*1.5,0);
+    g.add(antennaGroup);
+    // Small mast
+    const mast=mesh3(new T.CylinderGeometry(.003,.005,qgs*.2,4),0x556677);
+    mast.position.y=qgs*.1;antennaGroup.add(mast);
+    // Dish (parabolic)
+    const dishGeo=new T.CylinderGeometry(qgs*.15,qgs*.02,.005,10,1,true,0,Math.PI*2);
+    const dish=mesh3(dishGeo,0x88aabb,{shine:80});
+    dish.position.y=qgs*.22;dish.rotation.x=0.4;
+    antennaGroup.add(dish);
+    // Dish emitter (small glow at focal point)
+    const emit=basic3(new T.SphereGeometry(qgs*.015,5,5),0xff8844,{tr:true,op:.9,add:true});
+    emit.position.y=qgs*.2;emit.position.z=qgs*.05;
+    antennaGroup.add(emit);
+    // Energy wisps rising from the QG (blue mystical particles)
+    const qgWisps=makeParticles({count:6,origin:[0,qgs*0.2,0],radius:qgs*0.9,upward:true,spreadXZ:qgs*1.1,color:0x66ccff,size:0.006,lifetime:3.0,interval:0.5,mode:"smoke"});
+    g.userData._anim=(t)=>{
+      beacon.material.opacity=.4+Math.sin(t*3)*.5;
+      ering.rotation.z=t*.7;
+      ering.material.opacity=.4+Math.sin(t*2)*.2;
+      dome.material.emissiveIntensity=.25+Math.sin(t*1.5)*.1;
+      if(drone){const a=t*1.4;drone.position.set(Math.cos(a)*qgs*1.3,qgs*.3,Math.sin(a)*qgs*1.3);drone.rotation.y=t*2;}
+      // Radar antenna sweeps the sky (rotates steadily with slight dish tilt oscillation)
+      antennaGroup.rotation.y=t*1.1;
+      dish.rotation.x=0.4+Math.sin(t*0.6)*0.15;
+      emit.material.opacity=0.6+Math.sin(t*5)*0.3;
+    };
+
+  } else if(buildingId==="mine_metal"){
+    // ── MINE DE MÉTAL — puits avec treuil ──
+    // Shaft collar (square rim around the pit)
+    add(mesh3(new T.BoxGeometry(s*1.8,.018,s*1.8),0x445566),[0,.009,0]);
+    // Pit (dark circle)
+    add(basic3(new T.CircleGeometry(s*.55,12),0x0a0e14),[0,.019,0],[Math.PI/2,0,0]);
+    // 2 support beams forming an A-frame over the pit
+    [-.01,.01].forEach((ox,bi)=>{
+      const beam=mesh3(new T.CylinderGeometry(.006,.008,s*1.6,5),0x667788,{flat:true});
+      beam.position.set(ox,s*.8,0);beam.rotation.z=bi===0?.22:-.22;g.add(beam);
+    });
+    // Crossbar at top
+    add(mesh3(new T.CylinderGeometry(.005,.005,s*.5,5),0x778899),[0,s*1.45,0],[0,0,Math.PI/2]);
+    // Pulley wheel
+    const wheel=mesh3(new T.TorusGeometry(s*.14,.012,5,16),0x556677);
+    wheel.position.set(0,s*1.48,0);g.add(wheel);
+    // Cable
+    const cableGeo=new T.CylinderGeometry(.003,.003,s*1.1,3);
+    const cable=mesh3(cableGeo,0x888888);g.add(cable);
+    // Bucket on cable
+    const bucket=mesh3(new T.CylinderGeometry(s*.1,s*.08,s*.12,6),0x556677);
+    g.add(bucket);
+    // Debris/rock particles
+    const rocks=[];
+    for(let r=0;r<4;r++){
+      const rock=basic3(new T.DodecahedronGeometry(s*.04,0),0x667788);
+      rock.position.set((Math.random()-.5)*s,(Math.random()-.5)*s*.3+s*.5,Math.random()*s*.4-.2);
+      rock.userData={ph:r*1.4};rocks.push(rock);g.add(rock);
+    }
+    let bucketY=0;
+    // Dust puffs when bucket dumps rocks
+    makeParticles({count:8,origin:[0,s*0.3,0],radius:s*0.2,upward:true,spreadXZ:s*0.5,color:0x887766,size:0.008,lifetime:2.0,interval:0.4,mode:"smoke"});
+    g.userData._anim=(t)=>{
+      wheel.rotation.z=t*1.5;
+      bucketY=Math.sin(t*1.2)*.5+.5; // 0=down, 1=up
+      bucket.position.set(0,s*.2+bucketY*s*1.1,0);
+      cable.position.set(0,s*.2+bucketY*s*.55,0);
+      cable.scale.y=.2+bucketY*.8;
+      rocks.forEach(r=>{r.rotation.y=t+r.userData.ph;r.rotation.x=t*.7+r.userData.ph;});
+    };
+
+  } else if(buildingId==="mine_crystal"){
+    // ── MINE DE CRISTAL — cluster organique ──
+    const crystalConfigs=[
+      {h:s*1.5,r:s*.22,x:0,z:0,col:0x40a8e8,rot:0},
+      {h:s*1.1,r:s*.16,x:s*.3,z:s*.1,col:0x66ccff,rot:.3},
+      {h:s*.9,r:s*.13,x:-s*.25,z:s*.15,col:0x2288cc,rot:-.2},
+      {h:s*.7,r:s*.11,x:s*.1,z:-s*.28,col:0x88ddff,rot:.5},
+      {h:s*.6,r:s*.09,x:-s*.15,z:-s*.22,col:0x44aadd,rot:-.4},
+    ];
+    // Rocky base
+    add(mesh3(new T.DodecahedronGeometry(s*.5,1),0x223344,{flat:true}),[0,s*.12,0]);
+    // Crystal spikes
+    const crystalMeshes=[];
+    crystalConfigs.forEach((cfg,ci)=>{
+      const geo=new T.ConeGeometry(cfg.r,cfg.h,6);
+      const mat=new T.MeshPhongMaterial({color:cfg.col,emissive:new T.Color(cfg.col),emissiveIntensity:.3,transparent:true,opacity:.88,shininess:180});
+      const spike=new T.Mesh(geo,mat);
+      const baseY=cfg.h/2+s*.15;
+      spike.position.set(cfg.x,baseY,cfg.z);
+      spike.rotation.z=cfg.rot;spike.rotation.x=cfg.rot*.5;
+      spike.userData={crystalI:ci,baseEmit:.3,baseY,baseX:cfg.x,baseZ:cfg.z,baseRotZ:cfg.rot};g.add(spike);
+      crystalMeshes.push(spike);
+      // Inner light core
+      const core=basic3(new T.ConeGeometry(cfg.r*.3,cfg.h*.8,6),cfg.col,{tr:true,op:.4,add:true});
+      core.position.copy(spike.position);core.rotation.copy(spike.rotation);
+      core.userData={linkedSpike:spike};
+      g.add(core);
+    });
+    // Ground scatter: small crystal shards
+    for(let sh=0;sh<8;sh++){
+      const shard=mesh3(new T.ConeGeometry(s*.04,s*.12,4),0x66bbee,{shine:120});
+      const a=sh*Math.PI/4,d=s*.45+Math.random()*s*.15;
+      shard.position.set(Math.cos(a)*d,s*.06,Math.sin(a)*d);
+      shard.rotation.z=(Math.random()-.5)*.8;g.add(shard);
+    }
+    // Crystal sparkles rising from the spikes
+    makeParticles({count:10,origin:[0,s*0.4,0],radius:s*0.35,upward:true,spreadXZ:s*0.4,color:0x88ddff,size:0.004,lifetime:1.8,interval:0.25,mode:"spark"});
+    g.userData._anim=(t)=>{
+      crystalMeshes.forEach(ch=>{
+        if(ch.userData&&ch.userData.crystalI!==undefined){
+          const ci=ch.userData.crystalI;
+          // Pulse glow
+          ch.material.emissiveIntensity=.2+Math.sin(t*2+ci*1.1)*.2;
+          ch.material.opacity=.82+Math.sin(t*1.5+ci*.8)*.08;
+          // HUGE levitation — make it unmistakable
+          const float=Math.sin(t*1.5+ci*1.3)*s*0.6;
+          ch.position.y=ch.userData.baseY+float;
+          // Orbital drift — crystals circle their base position
+          ch.position.x=ch.userData.baseX+Math.sin(t*1.0+ci*0.7)*s*0.25;
+          ch.position.z=ch.userData.baseZ+Math.cos(t*1.0+ci*0.7)*s*0.25;
+          // Continuous rotation — always spinning
+          ch.rotation.y=t*(1+ci*0.3);
+          ch.rotation.z=ch.userData.baseRotZ+Math.sin(t*1.8+ci*0.5)*0.4;
+        }
+      });
+      // Inner cores follow their linked spikes
+      g.children.forEach(ch=>{
+        if(ch.userData&&ch.userData.linkedSpike){
+          ch.position.copy(ch.userData.linkedSpike.position);
+          ch.rotation.copy(ch.userData.linkedSpike.rotation);
+        }
+      });
+    };
+
+  } else if(buildingId==="synth_deut"){
+    // ── SYNTHÉTISEUR — tour industrielle avec tuyaux ──
+    // Base platform
+    add(mesh3(new T.CylinderGeometry(s*.8,s*.9,.02,10),0x334422),[0,.01,0]);
+    // Main tower body
+    add(mesh3(new T.CylinderGeometry(s*.35,s*.4,s*1.6,8),0x2a4a2a,{shine:40}),[0,s*.8,0]);
+    // Upper dome cap
+    add(mesh3(new T.SphereGeometry(s*.38,10,6,0,Math.PI*2,0,Math.PI/2),0x336633,{emit:0x113322,emitI:.3}),[0,s*1.6,0]);
+    // 3 horizontal pipe rings
+    [.3,.65,1.0].forEach(ht=>{
+      add(mesh3(new T.TorusGeometry(s*.42,.018,5,20),0x445533),[0,ht*s*1.6,0],[Math.PI/2,0,0]);
+    });
+    // Side pipes (2 thick pipes going up)
+    [-.45,.45].forEach(ox=>{
+      add(mesh3(new T.CylinderGeometry(s*.07,s*.07,s*1.2,6),0x3d5c3d),[ox*s,s*.6,0]);
+      // Pipe elbow at top
+      add(mesh3(new T.TorusGeometry(s*.1,s*.06,5,8,Math.PI/2),0x3d5c3d),[ox*s,s*1.25,s*.1],[0,ox>0?-Math.PI/2:Math.PI/2,0]);
+      // Horizontal pipe extending
+      add(mesh3(new T.CylinderGeometry(s*.06,s*.06,s*.35,6),0x3d5c3d),[ox*s+(ox>0?.15:-.15)*s,s*1.35,s*.12],[Math.PI/2,0,0]);
+    });
+    // Steam particles
+    const steamParticles=[];
+    for(let st=0;st<6;st++){
+      const steam=basic3(new T.SphereGeometry(s*.06+Math.random()*s*.04,5,4),0xaaddaa,{tr:true,op:.3});
+      steam.userData={stPhase:st*1.1,stIdx:st};
+      steamParticles.push(steam);g.add(steam);
+    }
+    // Glowing output nozzle
+    const nozzle=basic3(new T.SphereGeometry(s*.08,6,6),0x44ff88,{tr:true,op:.7,add:true});
+    add(nozzle,[0,s*1.72,0]);
+    // Spinning turbine blade (visible through a side window of the tower)
+    const turbine=new T.Group();
+    turbine.position.set(0,s*0.75,s*0.42);
+    g.add(turbine);
+    // 4 blades forming an X
+    for(let b=0;b<4;b++){
+      const blade=mesh3(new T.BoxGeometry(s*0.22,s*0.04,s*0.01),0x66aa66,{emit:0x224422,emitI:0.3,shine:60});
+      blade.rotation.z=b*Math.PI/2;
+      turbine.add(blade);
+    }
+    // Turbine hub
+    const hub=mesh3(new T.SphereGeometry(s*0.04,6,6),0x88cc88,{emit:0x44aa44,emitI:0.4});
+    turbine.add(hub);
+    // Steam puffs from the nozzle output
+    makeParticles({count:6,origin:[0,s*1.75,0],radius:s*0.08,upward:true,spreadXZ:s*0.15,color:0x88ffaa,size:0.012,lifetime:2.2,interval:0.35,mode:"smoke"});
+    g.userData._anim=(t)=>{
+      steamParticles.forEach(st=>{
+        const prog=(t*.5+st.userData.stPhase*.3)%1;
+        const side=st.userData.stIdx%2===0?-1:1;
+        st.position.set(side*s*.48+Math.sin(t+st.userData.stPhase)*s*.05,s*1.2+prog*s*.6,s*.12+Math.cos(t*.8+st.userData.stPhase)*s*.04);
+        st.material.opacity=.25*(1-prog);
+        st.scale.setScalar(1+prog*.5);
+      });
+      nozzle.material.opacity=.5+Math.sin(t*3)*.3;
+      nozzle.material.color.setHSL(.38+Math.sin(t)*.05,1,.5);
+      // Turbine spins fast
+      turbine.rotation.z=t*8;
+    };
+
+  } else if(buildingId==="centrale"){
+    // ── CENTRALE SOLAIRE — panneaux + pylône ──
+    // Central pylon
+    add(mesh3(new T.CylinderGeometry(.008,.014,s*1.1,5),0x556677),[0,s*.55,0]);
+    // Top hub
+    add(mesh3(new T.SphereGeometry(s*.12,8,6),0x4488aa,{emit:0xff8800,emitI:.4}),[0,s*1.15,0]);
+    // 3 rows of solar panels at angles — grouped for sun tracking
+    const panelConfigs=[
+      {x:-s*.7,y:s*.4,z:0,baseRx:-.3},
+      {x:0,y:s*.55,z:0,baseRx:-.15},
+      {x:s*.7,y:s*.4,z:0,baseRx:-.3},
+    ];
+    const panelGroups=[];
+    panelConfigs.forEach((cfg,pi)=>{
+      // Group holds frame + panel + grid lines so they all rotate together
+      const pg=new T.Group();
+      pg.position.set(cfg.x,cfg.y,cfg.z);
+      g.add(pg);
+      // Panel frame
+      const frame=mesh3(new T.BoxGeometry(s*.55,s*.35,.008),0x334455);
+      pg.add(frame);
+      // Panel surface (blue solar cells)
+      const panel=mesh3(new T.BoxGeometry(s*.5,s*.3,.006),0x1144aa,{emit:0x0033aa,emitI:.3,shine:100});
+      panel.position.z=.003;
+      pg.add(panel);
+      // Cell grid lines
+      [-.16,0,.16].forEach(cx=>{
+        const line=basic3(new T.BoxGeometry(.002,s*.28,.007),0x3366cc,{tr:true,op:.5});
+        line.position.set(cx,0,.005);
+        pg.add(line);
+      });
+      // Support arm (stays with building, not panel group)
+      const arm=mesh3(new T.CylinderGeometry(.005,.005,s*.35,4),0x445566);
+      arm.position.set(cfg.x*.5,cfg.y*.6,0);arm.rotation.z=Math.atan2(cfg.y*.6,cfg.x*.5);g.add(arm);
+      panelGroups.push({group:pg,panel,baseRx:cfg.baseRx,phase:pi*0.4});
+    });
+    // Ground base
+    add(mesh3(new T.CylinderGeometry(s*.95,s,0.015,12),0x334455),[0,.007,0]);
+    // Energy glow ring
+    const eglow=basic3(new T.TorusGeometry(s*.18,.008,5,24),0xffaa00,{tr:true,op:.6,add:true});
+    eglow.rotation.x=Math.PI/2;eglow.position.y=s*1.18;g.add(eglow);
+    g.userData._anim=(t)=>{
+      panelGroups.forEach((pg,pi)=>{
+        pg.panel.material.emissiveIntensity=.25+Math.sin(t*1.5+pi*.8)*.15;
+        // Panels tilt slowly to track the sun (oscillate between two angles)
+        const trackAngle=Math.sin(t*0.12+pg.phase)*0.35;
+        pg.group.rotation.x=pg.baseRx+trackAngle;
+        pg.group.rotation.y=Math.sin(t*0.08+pg.phase)*0.15;
+      });
+      eglow.rotation.z=t*.6;eglow.material.opacity=.5+Math.sin(t*2.5)*.2;
+    };
+    // Orange heat shimmer particles from the energy ring
+    makeParticles({count:8,origin:[0,s*1.2,0],radius:s*0.2,upward:true,spreadXZ:s*0.25,color:0xffaa44,size:0.006,lifetime:2.0,interval:0.3,mode:"smoke"});
+
+  } else if(buildingId==="usine_robots"){
+    // ── USINE DE ROBOTS — factory building ──
+    // Main building block
+    add(mesh3(new T.BoxGeometry(s*1.8,s*1.0,s*1.4),0x3a4a5a,{flat:true}),[0,s*.5,0]);
+    // Roof
+    add(mesh3(new T.BoxGeometry(s*1.85,s*.06,s*1.45),0x2a3a4a),[0,s*1.03,0]);
+    // Chimney
+    add(mesh3(new T.CylinderGeometry(s*.09,s*.1,s*.5,7),0x445566),[s*.5,s*1.28,s*.3]);
+    // Window (glowing)
+    const factoryWin=basic3(new T.PlaneGeometry(s*.55,s*.35),0xff6600,{tr:true,op:.7,add:true});
+    factoryWin.position.set(0,s*.52,s*.71);g.add(factoryWin);
+    // Robot arm visible through window
+    const armBase=new T.Group();armBase.position.set(0,s*.45,s*.6);g.add(armBase);
+    const armSeg1=mesh3(new T.BoxGeometry(s*.08,s*.35,s*.08),0x778899);
+    armSeg1.position.y=s*.17;armBase.add(armSeg1);
+    const armSeg2=mesh3(new T.BoxGeometry(s*.06,s*.28,s*.06),0x889aaa);
+    armSeg2.position.set(s*.12,s*.5,0);armBase.add(armSeg2);
+    const claw=mesh3(new T.SphereGeometry(s*.06,6,5),0xff4444,{emit:0xaa0000,emitI:.5});
+    claw.position.set(s*.2,s*.7,0);armBase.add(claw);
+    // Side door
+    add(mesh3(new T.BoxGeometry(s*.3,s*.4,.01),0x2a3a4a),[-s*.9+.01,s*.35,s*.2]);
+    // Smoke from chimney
+    const smokes=[];
+    for(let sm=0;sm<4;sm++){
+      const smoke=basic3(new T.SphereGeometry(s*.07+sm*s*.02,5,4),0x667788,{tr:true,op:.2});
+      smoke.userData={smI:sm};smokes.push(smoke);g.add(smoke);
+    }
+    g.userData._anim=(t)=>{
+      armBase.rotation.z=Math.sin(t*1.8)*.4;
+      armBase.rotation.x=Math.sin(t*1.2+.5)*.2;
+      claw.material.emissiveIntensity=.3+Math.sin(t*3)*.3;
+      factoryWin.material.opacity=.5+Math.sin(t*2.5)*.2;
+      smokes.forEach(sm=>{
+        const prog=(t*.35+sm.userData.smI*.25)%1;
+        sm.position.set(s*.5+Math.sin(t+sm.userData.smI)*.03,s*1.28+prog*s*.5,s*.3);
+        sm.material.opacity=.15*(1-prog);sm.scale.setScalar(1+prog*.6);
+      });
+    };
+    // Welding sparks flying outward from where the arm works
+    makeParticles({count:12,origin:[0,s*0.45,0],radius:s*0.1,upward:false,spreadXZ:s*0.35,color:0xffcc33,size:0.004,lifetime:1.0,interval:0.15,mode:"spark"});
+
+  } else {
+    // ── HANGAR ── (default for ships)
+    // Semicircular hangar structure
+    const hangarPoints=[];
+    for(let i=0;i<=12;i++){const a=i/12*Math.PI;hangarPoints.push(new T.Vector2(Math.cos(a)*s,Math.sin(a)*s));}
+    // Floor
+    add(mesh3(new T.CylinderGeometry(s*1.1,s*1.1,.012,20),0x2a3a4a),[0,.006,0]);
+    // Arch ribs
+    for(let r=0;r<5;r++){
+      const arch=mesh3(new T.TorusGeometry(s*.9,.025,5,16,Math.PI),0x334455);
+      arch.position.set(0,0,(r-2)*s*.28);arch.rotation.y=Math.PI/2;g.add(arch);
+    }
+    // Side walls
+    [-1,1].forEach(side=>{
+      add(mesh3(new T.BoxGeometry(.02,s*.9,s*1.2),0x2a3a4a),[side*s*.88,s*.45,0]);
+    });
+    // Landing pad markings
+    add(basic3(new T.RingGeometry(s*.3,s*.35,16),0xffaa00,{tr:true,op:.7}),[0,.013,0],[Math.PI/2,0,0]);
+    add(basic3(new T.CircleGeometry(s*.08,8),0xffaa00,{tr:true,op:.5}),[0,.013,0],[Math.PI/2,0,0]);
+    // Mini ship inside
+    const ship=new T.Group();ship.position.set(0,s*.15,0);g.add(ship);
+    const shipBody=mesh3(new T.ConeGeometry(s*.18,s*.5,5),0x6677aa,{emit:0x223355,emitI:.2});
+    shipBody.position.set(0,s*.25,0);shipBody.rotation.set(Math.PI/2,0,0);
+    ship.add(shipBody);
+    const shipWing=mesh3(new T.BoxGeometry(s*.5,s*.04,s*.18),0x556688);
+    shipWing.position.set(0,s*.15,0);
+    ship.add(shipWing);
+    // Landing lights
+    const lights=[];
+    for(let l=0;l<4;l++){
+      const a=l*Math.PI/2;
+      const lt=basic3(new T.SphereGeometry(s*.04,4,4),0x00aaff,{tr:true,op:.8,add:true});
+      lt.position.set(Math.cos(a)*s*.88,s*.02,Math.sin(a)*s*.88);
+      lt.userData={ltPhase:l*Math.PI/2};lights.push(lt);g.add(lt);
+    }
+    g.userData._anim=(t)=>{
+      // Very visible continuous animation: ship bobs up and down + spins continuously
+      ship.position.y=s*0.15+Math.abs(Math.sin(t*0.8))*s*2.5;
+      ship.rotation.y=t*2.5;
+      ship.rotation.x=Math.sin(t*0.8)*0.3;
+      // All lights blink fast
+      lights.forEach(lt=>{
+        lt.material.opacity=0.3+Math.abs(Math.sin(t*4+lt.userData.ltPhase))*0.7;
+      });
+    };
+    // Engine exhaust — visible when ship is in air
+    makeParticles({count:8,origin:[0,s*0.1,0],radius:s*0.05,upward:false,spreadXZ:s*0.1,color:0x66ddff,size:0.006,lifetime:0.8,interval:0.1,mode:"smoke"});
+  }
+
+  // Apply level scale + global size boost for better visibility
+  if(buildingId!=="qg")g.scale.setScalar(1.6*(1+lv*0.07));
+  else g.scale.setScalar(1.6);
+  return g;
+}
+
+
+function Mini3DBuilding({buildingId,level,terrainColor}){
+  const mountRef=useRef();
+  useEffect(()=>{
+    if(!window.THREE||!mountRef.current)return;
+    const T=window.THREE,div=mountRef.current;
+    const W=div.clientWidth||80,H=div.clientHeight||80;
+    const renderer=new T.WebGLRenderer({antialias:true,alpha:true});
+    renderer.setSize(W,H);renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
+    renderer.setClearColor(0x000000,0);
+    div.appendChild(renderer.domElement);
+    const scene=new T.Scene();
+    const cam=new T.PerspectiveCamera(38,W/H,0.01,10);
+    cam.position.set(0.55,0.42,0.55);
+    cam.lookAt(0,0.1,0);
+    // Lights: warm key + cool fill + ambient
+    scene.add(new T.DirectionalLight(0xfff5e0,1.5).position.set(1,2,1.5));
+    scene.add(new T.DirectionalLight(0x6699cc,0.6).position.set(-1,-0.5,-1));
+    scene.add(new T.AmbientLight(0x445566,0.9));
+    // Terrain disc under building (hint of ground)
+    if(terrainColor){
+      const disc=new T.Mesh(
+        new T.CircleGeometry(0.16,24),
+        new T.MeshBasicMaterial({color:new T.Color(terrainColor),transparent:true,opacity:0.25,side:T.DoubleSide})
+      );
+      disc.rotation.x=-Math.PI/2;
+      disc.position.y=0;
+      scene.add(disc);
+    }
+    // Build the building using same factory
+    let bld=null;
+    try{bld=makeBuildingGroup(T,buildingId,level||1,false,1);}catch(e){console.warn("mini build err",e);}
+    if(bld){
+      // Scale down for card preview
+      bld.scale.multiplyScalar(1.3);
+      scene.add(bld);
+    }
+    let t=0,af=0;
+    const loop=()=>{
+      af=requestAnimationFrame(loop);
+      t+=0.016;
+      // Slow rotation so user sees all angles
+      if(bld){
+        bld.rotation.y=t*0.4;
+        // Call building's own anim function
+        if(bld.userData&&bld.userData._anim)bld.userData._anim(t);
+        // Animate base LEDs
+        if(bld.userData&&bld.userData._baseLEDs){
+          const led=bld.userData._baseLEDs;
+          if(led.rim&&led.rim.material)led.rim.material.opacity=0.35+Math.sin(t*1.5)*0.35;
+          if(led.cardinals){
+            led.cardinals.forEach(c=>{
+              if(c.mesh&&c.mesh.material)c.mesh.material.opacity=0.3+Math.max(0,Math.sin(t*2.5+c.phase))*0.7;
+            });
+          }
+        }
+        // Particles
+        if(bld.userData&&bld.userData._particles){
+          bld.userData._particles.forEach(sys=>{
+            const opts=sys.opts;
+            if(t-sys.lastSpawn>opts.interval){
+              sys.lastSpawn=t;
+              const dead=sys.particles.find(p=>t-p.born>p.life);
+              if(dead){
+                dead.born=t;
+                dead.life=opts.lifetime*(0.7+Math.random()*0.6);
+                const ang=Math.random()*Math.PI*2;
+                const rad=Math.random()*opts.radius;
+                dead.mesh.position.set(
+                  opts.origin[0]+Math.cos(ang)*rad,
+                  opts.origin[1],
+                  opts.origin[2]+Math.sin(ang)*rad
+                );
+                if(opts.mode==="spark"){
+                  const sAng=Math.random()*Math.PI*2;
+                  const sSpeed=0.03+Math.random()*0.04;
+                  dead.vx=Math.cos(sAng)*sSpeed;
+                  dead.vz=Math.sin(sAng)*sSpeed;
+                  dead.vy=0.02+Math.random()*0.03;
+                }else{
+                  dead.vx=(Math.random()-0.5)*0.008;
+                  dead.vz=(Math.random()-0.5)*0.008;
+                  dead.vy=opts.upward?0.015+Math.random()*0.01:-0.008;
+                }
+                dead.mesh.visible=true;
+                dead.mesh.material.opacity=0;
+              }
+            }
+            sys.particles.forEach(p=>{
+              const age=t-p.born;
+              if(age>p.life){p.mesh.visible=false;return;}
+              const lifeRatio=age/p.life;
+              p.mesh.position.x+=p.vx;
+              p.mesh.position.y+=p.vy;
+              p.mesh.position.z+=p.vz;
+              if(opts.mode==="spark")p.vy-=0.0015;
+              const fadeIn=Math.min(1,lifeRatio*6);
+              const fadeOut=1-lifeRatio;
+              p.mesh.material.opacity=fadeIn*fadeOut*0.85;
+              const scale=opts.mode==="spark"?(1-lifeRatio*0.5):(1+lifeRatio*1.5);
+              p.mesh.scale.setScalar(scale);
+            });
+          });
+        }
+      }
+      renderer.render(scene,cam);
+    };
+    loop();
+    return()=>{
+      cancelAnimationFrame(af);
+      try{renderer.forceContextLoss&&renderer.forceContextLoss();}catch(e){}
+      renderer.dispose();
+      while(div.firstChild)div.removeChild(div.firstChild);
+    };
+  },[buildingId,level,terrainColor]);
+  return <div ref={mountRef} style={{width:"100%",height:"100%",pointerEvents:"none"}}/>;
+}
+
+function ContinentModal({continent,planet,state,onBuildInZone,onClose,readOnly}){
+  const planetType=state&&state.planetType||"Tellurique";
+  const[selZone,setSelZone]=useState(null);
+  const[scanProgress,setScanProgress]=useState(0);
+  const[size,setSize]=useState(()=>{const vv=window.visualViewport;return{w:vv?vv.width:window.innerWidth,h:vv?vv.height:window.innerHeight};});
+  const affectedRef=useRef([]);
+  // Animate scan line on mount
+  useEffect(()=>{
+    let raf,t0=Date.now();
+    const tick=()=>{
+      const e=(Date.now()-t0)/1200;
+      if(e<1){setScanProgress(e);raf=requestAnimationFrame(tick);}
+      else setScanProgress(1);
+    };
+    tick();
+    return()=>{if(raf)cancelAnimationFrame(raf);};
+  },[continent.id]);
+  useEffect(()=>{
+    const prev=document.body.style.overflow;
+    document.body.style.overflow="hidden";
+    const tmr=setTimeout(()=>{
+      const cvs=document.querySelectorAll("canvas");
+      affectedRef.current=[];
+      cvs.forEach(c=>{affectedRef.current.push({el:c,prev:c.style.pointerEvents});c.style.pointerEvents="none";});
+    },0);
+    return()=>{
+      document.body.style.overflow=prev;clearTimeout(tmr);
+      affectedRef.current.forEach(a=>{try{a.el.style.pointerEvents=a.prev||"";}catch(e){}});
+      affectedRef.current=[];
+    };
+  },[]);
+  useEffect(()=>{
+    const on=()=>{
+      const vv=window.visualViewport;
+      const w=vv?vv.width:window.innerWidth;
+      const h=vv?vv.height:window.innerHeight;
+      setSize({w,h});
+    };
+    on();
+    window.addEventListener("resize",on);
+    window.addEventListener("orientationchange",on);
+    if(window.visualViewport){
+      window.visualViewport.addEventListener("resize",on);
+      window.visualViewport.addEventListener("scroll",on);
+    }
+    return()=>{
+      window.removeEventListener("resize",on);
+      window.removeEventListener("orientationchange",on);
+      if(window.visualViewport){
+        window.visualViewport.removeEventListener("resize",on);
+        window.visualViewport.removeEventListener("scroll",on);
+      }
+    };
+  },[]);
+  const W=size.w,H=size.h;
+  const zones=continent.zones||[];
+  const rl=(state.buildings||{}).usine_robots||0;
+  // Terrain icons and colors (sci-fi palette)
+  const TERRAIN_ICONS={ocean:"🌊",coast:"🏖",plain:"🌾",forest:"🌲",mountain:"⛰",volcano:"🌋",tundra:"🧊",desert:"🏜",swamp:"🌿",ice:"🧊"};
+  const TERRAIN_COLORS={
+    ocean:"#4da8d4",coast:"#6ab8e0",plain:"#7ac86a",forest:"#3a8a40",
+    mountain:"#9a8a7a",volcano:"#e85830",tundra:"#b0d8e0",desert:"#d8b058",
+    swamp:"#6a8a4a",ice:"#b0d8e0"
+  };
+  // Planet type background gradient
+  const PLANET_BG={
+    "Tellurique":["#0d2a18","#051508","#020a04"],
+    "Gazeuse":["#2a1d10","#140a05","#080402"],
+    "Glaciale":["#152838","#080f18","#030608"],
+    "Désertique":["#382808","#1a1204","#0a0702"],
+    "Océanique":["#0d2238","#050f1c","#02060c"],
+    "Volcanique":["#2a0a04","#140402","#080201"],
+    "Forestière":["#0d2810","#051208","#020604"]
+  };
+  const bg=PLANET_BG[planetType]||PLANET_BG["Tellurique"];
+  // Derive star-like points on mount (stable via useMemo pattern using ref)
+  const starsRef=useRef(null);
+  if(!starsRef.current){
+    starsRef.current=Array.from({length:30},(_,i)=>({
+      x:((continent.id*73+i*41)%97)/97,
+      y:((continent.id*53+i*29)%89)/89,
+      sz:0.5+((i*7)%5)/5*1.2,
+      op:0.2+((i*3)%7)/7*0.5
+    }));
+  }
+  // Layout: responsive grid of zone cards. Portrait: 2 columns; landscape: 3-4 columns.
+  const isLandscape=W>=H;
+  const cols=isLandscape?(zones.length>=3?3:zones.length):2;
+  // Build zone layout positions (hex-style grid layout with offset rows)
+  const hdrSt={position:"absolute",top:0,left:0,right:0,height:52,display:"flex",alignItems:"center",justifyContent:"space-between",padding:"0 14px",background:"rgba(4,10,22,0.92)",backdropFilter:"blur(8px)",borderBottom:"1px solid #1a4060",zIndex:20};
+  const wrapSt={position:"fixed",top:0,left:0,right:0,bottom:0,zIndex:500,pointerEvents:"auto",background:"linear-gradient(135deg,"+bg[0]+" 0%,"+bg[1]+" 60%,"+bg[2]+" 100%)",height:"100svh",minHeight:"100dvh",maxHeight:"100dvh",overflow:"hidden",fontFamily:"monospace"};
+  const gridAreaSt={position:"absolute",top:52,left:0,right:0,bottom:0,display:"flex",alignItems:"center",justifyContent:"center",padding:"20px 16px",zIndex:5};
+  const panelSt={position:"absolute",left:"50%",top:"50%",transform:"translate(-50%,-50%)",width:"min(480px,94vw)",maxHeight:"82vh",overflowY:"auto",WebkitOverflowScrolling:"touch",background:"rgba(8,16,30,0.96)",border:"1px solid #1a4060",borderRadius:10,padding:"14px 16px 18px",boxShadow:"0 0 30px rgba(0,40,100,0.5),inset 0 0 20px rgba(30,70,130,0.1)",color:"#9abcd8",fontFamily:"monospace",zIndex:30};
+  // Corner bracket component
+  const Corner=({pos,color})=>{
+    const stylesByPos={
+      tl:{top:0,left:0,borderTop:"2px solid "+color,borderLeft:"2px solid "+color,borderTopLeftRadius:8},
+      tr:{top:0,right:0,borderTop:"2px solid "+color,borderRight:"2px solid "+color,borderTopRightRadius:8},
+      bl:{bottom:0,left:0,borderBottom:"2px solid "+color,borderLeft:"2px solid "+color,borderBottomLeftRadius:8},
+      br:{bottom:0,right:0,borderBottom:"2px solid "+color,borderRight:"2px solid "+color,borderBottomRightRadius:8}
+    };
+    return <div style={{position:"absolute",width:12,height:12,...stylesByPos[pos]}}/>;
+  };
+  // Compute per-zone card color based on terrain
+  const buildingIcon=(bid)=>{
+    const b=BUILDINGS.find(x=>x.id===bid);
+    return b?b.icon:"";
+  };
+  const buildingName=(bid)=>{
+    const b=BUILDINGS.find(x=>x.id===bid);
+    return b?b.name:"";
+  };
+  const buildingLv=(bid)=>state.buildings&&state.buildings[bid]||0;
+  // Zone card click handler
+  const onZoneTap=(z)=>{
+    // In readOnly mode (visiting another player or a wild planet), tap opens the info modal.
+    // In owner mode, tap toggles the build panel.
+    setSelZone(selZone&&selZone.id===z.id?null:z);
+  };
+  return(<div style={wrapSt}>
+    {/* Animated background: starfield + scan grid */}
+    <svg style={{position:"absolute",top:0,left:0,width:"100%",height:"100%",zIndex:1,pointerEvents:"none",opacity:0.7}}>
+      <defs>
+        <pattern id="hudgrid" x="0" y="0" width="60" height="60" patternUnits="userSpaceOnUse">
+          <path d="M60 0 L0 0 0 60" fill="none" stroke="rgba(50,100,160,0.08)" strokeWidth="0.5"/>
+        </pattern>
+        <linearGradient id="scanline" x1="0%" y1="0%" x2="0%" y2="100%">
+          <stop offset="0%" stopColor="rgba(100,200,255,0)"/>
+          <stop offset="50%" stopColor="rgba(100,200,255,0.25)"/>
+          <stop offset="100%" stopColor="rgba(100,200,255,0)"/>
+        </linearGradient>
+      </defs>
+      <rect width="100%" height="100%" fill="url(#hudgrid)"/>
+      {/* Stars */}
+      {starsRef.current.map((s,i)=>(
+        <circle key={i} cx={s.x*W} cy={s.y*H} r={s.sz} fill="white" opacity={s.op}/>
+      ))}
+      {/* Moving scan line */}
+      {scanProgress<1&&(
+        <rect x="0" y={scanProgress*H-30} width="100%" height="60" fill="url(#scanline)"/>
+      )}
+    </svg>
+    {/* HUD header */}
+    <div style={hdrSt}>
+      <div style={{display:"flex",alignItems:"center",gap:12,flex:1,minWidth:0}}>
+        <div style={{display:"flex",alignItems:"center",gap:6}}>
+          <div style={{width:8,height:8,borderRadius:"50%",background:"#44ff88",boxShadow:"0 0 8px #44ff88",animation:"pulse 2s infinite"}}/>
+          <span style={{fontSize:9,color:"#44ff88",letterSpacing:2,fontFamily:"monospace"}}>ACTIF</span>
+        </div>
+        <div style={{height:16,width:1,background:"#1a4060"}}/>
+        <span style={{fontSize:17,color:"#c8e0ff",fontWeight:"bold",letterSpacing:3,fontFamily:"monospace"}}>{(continent.name||"").toUpperCase()}</span>
+        <span style={{fontSize:9,color:"#5a7aa0",fontFamily:"monospace",letterSpacing:1}}>{"// "+zones.length+" SECTEURS DÉTECTÉS"}</span>
+        {state&&state.planetType&&PLANET_PASSIVE_BONUS[state.planetType]&&(
+          <span style={{fontSize:9,color:"#ffc870",marginLeft:"auto",padding:"3px 10px",borderRadius:4,background:"rgba(80,60,20,0.5)",border:"1px solid rgba(200,160,80,0.4)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",letterSpacing:1}}>{"✦ "+PLANET_PASSIVE_BONUS[state.planetType].label}</span>
+        )}
+      </div>
+      <button onClick={onClose} style={{background:"rgba(20,40,80,0.6)",border:"1px solid #1a4060",color:"#9abcd8",cursor:"pointer",fontSize:11,padding:"6px 14px",borderRadius:4,fontFamily:"monospace",letterSpacing:2,flexShrink:0,marginLeft:8}}>{"FERMER ×"}</button>
+    </div>
+    {/* Zones grid */}
+    <div style={gridAreaSt}>
+      <div style={{display:"grid",gridTemplateColumns:"repeat("+cols+",1fr)",gap:12,maxWidth:"min(900px,100%)",width:"100%",alignContent:"center"}}>
+        {zones.map((z,zi)=>{
+          const isSelected=selZone&&selZone.id===z.id;
+          const col=TERRAIN_COLORS[z.type]||"#7a9aa0";
+          const icon=TERRAIN_ICONS[z.type]||"◆";
+          const hasBuilding=!!z.building;
+          const delay=zi*60;
+          return(
+            <div key={z.id}
+              onClick={()=>onZoneTap(z)}
+              style={{
+                position:"relative",
+                background:"linear-gradient(160deg,rgba(10,20,40,0.82),rgba(6,12,26,0.92))",
+                border:"1px solid "+(isSelected?col:"rgba(40,80,130,0.5)"),
+                borderRadius:10,
+                padding:"14px 12px 12px",
+                cursor:"pointer",
+                transition:"all 0.2s",
+                opacity:scanProgress<0.3?0:1,
+                transform:"translateY("+(scanProgress<0.3?10:0)+"px)",
+                animation:"fadeIn 0.4s "+delay+"ms backwards",
+                boxShadow:isSelected?"0 0 20px "+col+"66,inset 0 0 20px "+col+"22":"inset 0 0 15px rgba(20,50,100,0.15)",
+                minHeight:170
+              }}>
+              <Corner pos="tl" color={col+"aa"}/>
+              <Corner pos="tr" color={col+"aa"}/>
+              <Corner pos="bl" color={col+"aa"}/>
+              <Corner pos="br" color={col+"aa"}/>
+              {/* Main visual: mini 3D building if built, else terrain icon */}
+              {hasBuilding?(
+                <div style={{width:"100%",height:80,marginTop:2,marginBottom:6,filter:"drop-shadow(0 4px 10px "+col+"44)"}}>
+                  <Mini3DBuilding buildingId={z.building} level={buildingLv(z.building)} terrainColor={col}/>
+                </div>
+              ):(
+                <div style={{textAlign:"center",fontSize:40,marginTop:6,marginBottom:8,filter:"drop-shadow(0 0 8px "+col+"55)"}}>{icon}</div>
+              )}
+              {/* Zone name */}
+              <div style={{fontSize:12,color:col,fontWeight:"bold",textAlign:"center",letterSpacing:1,marginBottom:3,fontFamily:"monospace"}}>{(z.name||"").toUpperCase()}</div>
+              {/* Terrain type */}
+              <div style={{fontSize:8,color:"#6a8ab0",textAlign:"center",letterSpacing:2,marginBottom:10,fontFamily:"monospace"}}>{(z.type||"").toUpperCase()}</div>
+              {/* Building status */}
+              <div style={{borderTop:"1px dashed rgba(40,80,130,0.4)",paddingTop:8,marginTop:"auto"}}>
+                {hasBuilding?(
+                  <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:6}}>
+                    <span style={{fontSize:14}}>{buildingIcon(z.building)}</span>
+                    <span style={{fontSize:10,color:"#c8e0ff",fontFamily:"monospace"}}>{buildingName(z.building)}</span>
+                    <span style={{fontSize:9,color:"#44ff88",fontWeight:"bold",fontFamily:"monospace"}}>{"LV"+buildingLv(z.building)}</span>
+                  </div>
+                ):(
+                  <div style={{textAlign:"center",fontSize:9,color:"#4a6a90",letterSpacing:2,fontFamily:"monospace"}}>{readOnly?"— VIDE —":"[ CONSTRUIRE ]"}</div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+    {/* Build panel */}
+    {selZone&&!readOnly&&(
+      <div style={panelSt}>
+        <ZoneBuildPanel zone={selZone} planet={planet} state={state} rl={rl} allContinents={state.continents||[]} onBuild={(z,b,lv)=>{onBuildInZone(z,b,lv);setSelZone(null);}} onClose={()=>setSelZone(null)}/>
+      </div>
+    )}
+    {/* Visitor view: readonly info only */}
+    {selZone&&readOnly&&<ZoneInfoModal zone={selZone} onClose={()=>setSelZone(null)}/>}
+  </div>);
+}
+
+function ZoneBuildPanel({zone,planet,state,rl,allContinents,onBuild,onClose}){
+  const[showInfo,setShowInfo]=useState(false);
+  const placedBld=zone.building?BUILDINGS.find(b=>b.id===zone.building):null;
+  const lv=placedBld?(state.buildings[placedBld.id]||0):0;
+  const cost=placedBld?bCost(placedBld,lv,planet):null;
+  const afford=cost?canAfford(state.resources,cost):false;
+  const busy=!!state.queue;
+  const secs=placedBld?bTime(placedBld,lv,rl,planet,state,state&&state.zones):0;
+  const TERRAIN_ICONS={ocean:"🌊",coast:"🏖",plain:"🌾",forest:"🌲",mountain:"⛰",volcano:"🌋",tundra:"🧊",desert:"🏜",swamp:"🌿",ice:"🧊"};
+  const TERRAIN_COLORS={
+    ocean:"#4da8d4",coast:"#6ab8e0",plain:"#7ac86a",forest:"#3a8a40",
+    mountain:"#9a8a7a",volcano:"#e85830",tundra:"#b0d8e0",desert:"#d8b058",
+    swamp:"#6a8a4a",ice:"#b0d8e0"
+  };
+  const RES_ICONS={metal:"⛏",crystal:"💎",deut:"⚗",energy:"⚡",buildSpeed:"🤖",shipCost:"🚀"};
+  const RES_LABELS={metal:"Métal",crystal:"Cristal",deut:"Deutérium",energy:"Énergie",buildSpeed:"Vitesse constr.",shipCost:"Coût vaisseaux"};
+  const BLD_PRODUCES={
+    mine_metal:{metal:"produit"},
+    mine_crystal:{crystal:"produit"},
+    synth_deut:{deut:"produit"},
+    centrale:{energy:"produit"},
+    usine_robots:{buildSpeed:"vitesse de construction"},
+    hangar:{shipCost:"coût des vaisseaux"}
+  };
+  const terrain=zone.terrain||{};
+  const bonuses=terrain.bonuses||{};
+  const bonusKeys=Object.keys(bonuses);
+  const col=TERRAIN_COLORS[zone.type]||"#7a9aa0";
+  const icon=TERRAIN_ICONS[zone.type]||"◆";
+  return(<div>
+    {/* Header: zone info + terrain bonuses */}
+    <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:10,marginBottom:10,paddingBottom:10,borderBottom:"1px solid rgba(40,80,130,0.4)"}}>
+      <div style={{flex:1,minWidth:0}}>
+        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
+          <span style={{fontSize:24,filter:"drop-shadow(0 0 6px "+col+"55)"}}>{icon}</span>
+          <div>
+            <div style={{fontSize:13,color:col,fontWeight:"bold",letterSpacing:2,fontFamily:"monospace"}}>{(zone.name||"").toUpperCase()}</div>
+            <div style={{fontSize:8,color:"#6a8ab0",letterSpacing:2,fontFamily:"monospace",marginTop:1}}>{(zone.type||"").toUpperCase()}</div>
+          </div>
+        </div>
+        {bonusKeys.length>0&&(
+          <div style={{display:"flex",flexWrap:"wrap",gap:4,marginTop:6}}>
+            {bonusKeys.filter(k=>k.indexOf("qg")!==0).map(k=>{
+              const isRed=k==="buildSpeed"||k==="shipCost";
+              return(<span key={k} style={{fontSize:9,color:"#9adda0",padding:"2px 7px",background:"rgba(40,90,50,0.35)",border:"1px solid rgba(80,160,90,0.4)",borderRadius:3,letterSpacing:1,fontFamily:"monospace"}}>
+                {(RES_ICONS[k]||"+")+" "+(RES_LABELS[k]||k)+" "}<b>{(isRed?"−":"+")+Math.round(bonuses[k]*100)+"%"}</b>
+              </span>);
+            })}
+          </div>
+        )}
+      </div>
+      <div style={{display:"flex",gap:5,flexShrink:0}}>
+        <button onClick={()=>setShowInfo(true)} title="Détails de la zone" style={{background:"rgba(20,60,100,0.5)",border:"1px solid rgba(60,140,200,0.5)",color:"#88ccee",cursor:"pointer",fontSize:11,padding:"5px 10px",borderRadius:4,fontFamily:"monospace",letterSpacing:1,fontWeight:"bold"}}>{"ⓘ"}</button>
+        <button onClick={onClose} style={{background:"rgba(20,40,80,0.6)",border:"1px solid #1a4060",color:"#9abcd8",cursor:"pointer",fontSize:11,padding:"5px 10px",borderRadius:4,fontFamily:"monospace",letterSpacing:1}}>×</button>
+      </div>
+    </div>
+    {placedBld?(
+      /* ── Upgrade existing building ── */
+      <div>
+        <div style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",background:"rgba(30,60,100,0.3)",border:"1px solid rgba(60,120,180,0.35)",borderRadius:6,marginBottom:10}}>
+          <span style={{fontSize:28}}>{placedBld.icon}</span>
+          <div style={{flex:1}}>
+            <div style={{fontSize:12,color:"#c8e0ff",fontWeight:"bold",fontFamily:"monospace",letterSpacing:1}}>{placedBld.name.toUpperCase()}</div>
+            <div style={{fontSize:9,color:"#7ac86a",fontFamily:"monospace",marginTop:1}}>NIVEAU {lv}{placedBld.terrainBonus&&placedBld.terrainBonus.includes(zone.type)?" · ✓ BONUS TERRAIN ACTIF":""}</div>
+          </div>
+        </div>
+        {placedBld.desc&&<div style={{fontSize:10,color:"#8aa8cc",lineHeight:1.4,marginBottom:10,fontStyle:"italic",padding:"0 4px"}}>{placedBld.desc}</div>}
+        <div style={{fontSize:9,color:"#6a8ab0",letterSpacing:2,fontFamily:"monospace",marginBottom:6}}>AMÉLIORATION NIVEAU {lv+1} :</div>
+        <div style={{display:"flex",gap:10,marginBottom:10,flexWrap:"wrap",padding:"8px 10px",background:"rgba(10,20,40,0.5)",borderRadius:4,fontFamily:"monospace"}}>
+          {cost.metal>0&&<span style={{fontSize:11,color:state.resources.metal>=cost.metal?"#c8e0ff":"#ff7070"}}>{"⛏ "}{fmt(cost.metal)}</span>}
+          {cost.crystal>0&&<span style={{fontSize:11,color:state.resources.crystal>=cost.crystal?"#c8e0ff":"#ff7070"}}>{"💎 "}{fmt(cost.crystal)}</span>}
+          {cost.deut>0&&<span style={{fontSize:11,color:state.resources.deut>=cost.deut?"#c8e0ff":"#ff7070"}}>{"⚗ "}{fmt(cost.deut)}</span>}
+          <span style={{fontSize:11,color:"#7a9ac0",marginLeft:"auto"}}>{"⏱ "}{fmtT(secs)}</span>
+        </div>
+        <button onClick={()=>{if(afford&&!busy)onBuild(zone,placedBld,lv);}} disabled={!afford||busy} style={{width:"100%",padding:"11px 0",borderRadius:6,border:"1px solid "+(afford&&!busy?"#44aa66":"#2a4060"),cursor:afford&&!busy?"pointer":"not-allowed",background:afford&&!busy?"linear-gradient(180deg,rgba(60,150,90,0.5),rgba(30,90,60,0.5))":"rgba(20,30,50,0.5)",color:afford&&!busy?"#d0ffd8":"#5a7aa0",fontSize:11,fontFamily:"monospace",fontWeight:"bold",letterSpacing:2}}>
+          {busy?"⚠ FILE OCCUPÉE":!afford?"⚠ RESSOURCES INSUFFISANTES":"⚙ AMÉLIORER AU NIV "+(lv+1)}
+        </button>
+      </div>
+    ):(
+      /* ── Choose building to construct ── */
+      <div>
+        <div style={{fontSize:9,color:"#6a8ab0",letterSpacing:2,fontFamily:"monospace",marginBottom:8}}>SÉLECTIONNER UNE STRUCTURE :</div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7}}>
+          {BUILDINGS.filter(b=>b.id!=="qg").map(b=>{
+            const blv=state.buildings[b.id]||0;
+            const bcost=bCost(b,blv,planet);
+            const baff=canAfford(state.resources,bcost);
+            const alreadyPlaced=allContinents.some(c=>c.zones.some(z=>z.building===b.id));
+            // Compute exact bonus percentage: what does this zone boost for this building?
+            // Map building's 'produces' to the matching terrain bonus key.
+            let bonusPct=0;
+            const bonusKey=b.produces==="speed"?"buildSpeed":b.produces==="ships"?"shipCost":b.produces;
+            if(bonusKey&&bonuses[bonusKey]){
+              bonusPct=Math.round(bonuses[bonusKey]*100);
+            }
+            // Only consider it a "bonus" if the zone actually gives a bonus on what this building produces.
+            const isBonus=bonusPct>0;
+            const isReduction=bonusKey==="buildSpeed"||bonusKey==="shipCost";
+            const disabled=!baff||busy||alreadyPlaced;
+            // Detect what this building produces for quick summary
+            const produces=BLD_PRODUCES[b.id]||{};
+            const prodKey=Object.keys(produces)[0];
+            return(<button key={b.id} onClick={()=>{if(!disabled)onBuild(zone,b,blv);}} disabled={disabled} style={{
+              position:"relative",
+              padding:"10px 9px 9px",
+              borderRadius:6,
+              border:"1px solid "+(isBonus?"#44aa66":disabled?"#2a4060":"#1a4060"),
+              background:isBonus?"linear-gradient(160deg,rgba(30,70,40,0.5),rgba(20,50,30,0.6))":disabled?"rgba(10,20,35,0.5)":"linear-gradient(160deg,rgba(15,30,55,0.7),rgba(10,20,40,0.8))",
+              color:disabled?"#4a6a90":"#c8e0ff",
+              cursor:disabled?"not-allowed":"pointer",
+              fontFamily:"monospace",
+              textAlign:"left",
+              opacity:alreadyPlaced?0.5:1,
+              boxShadow:isBonus?"0 0 10px rgba(68,170,102,0.25)":"none",
+              transition:"transform 0.15s"
+            }}>
+              {isBonus&&<div style={{position:"absolute",top:-7,right:6,fontSize:8,background:"#44aa66",color:"#fff",padding:"2px 7px",borderRadius:3,fontWeight:"bold",letterSpacing:1,boxShadow:"0 0 6px rgba(68,170,102,0.6)"}}>{"★ "+(isReduction?"−":"+")+bonusPct+"%"}</div>}
+              {alreadyPlaced&&<div style={{position:"absolute",top:-7,right:6,fontSize:8,background:"#8a2020",color:"#fff",padding:"2px 6px",borderRadius:3,fontWeight:"bold",letterSpacing:1}}>⚠ DÉJÀ PLACÉ</div>}
+              <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
+                <span style={{fontSize:22}}>{b.icon}</span>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontSize:10.5,fontWeight:"bold",letterSpacing:1,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{b.name}</div>
+                  {prodKey&&<div style={{fontSize:8,color:isBonus?"#9adda0":"#7a9ac0",marginTop:1,letterSpacing:0.5}}>{"Produit "+RES_ICONS[prodKey]+" "+(RES_LABELS[prodKey]||prodKey)}</div>}
+                </div>
+              </div>
+              {b.desc&&<div style={{fontSize:9,color:"#8aa8cc",lineHeight:1.35,marginBottom:8,fontStyle:"italic",opacity:0.85}}>{b.desc}</div>}
+              <div style={{display:"flex",gap:6,flexWrap:"wrap",fontSize:9,paddingTop:6,borderTop:"1px dashed rgba(60,100,150,0.25)"}}>
+                {bcost.metal>0&&<span style={{color:state.resources.metal>=bcost.metal?"#c8e0ff":"#ff8080"}}>{"⛏"}{fmt(bcost.metal)}</span>}
+                {bcost.crystal>0&&<span style={{color:state.resources.crystal>=bcost.crystal?"#c8e0ff":"#ff8080"}}>{"💎"}{fmt(bcost.crystal)}</span>}
+                {bcost.deut>0&&<span style={{color:state.resources.deut>=bcost.deut?"#c8e0ff":"#ff8080"}}>{"⚗"}{fmt(bcost.deut)}</span>}
+              </div>
+            </button>);
+          })}
+        </div>
+        {busy&&<div style={{fontSize:9,color:"#ffa060",textAlign:"center",marginTop:8,fontFamily:"monospace",letterSpacing:1}}>⚠ UNE CONSTRUCTION EST DÉJÀ EN COURS</div>}
+      </div>
+    )}
+    {showInfo&&<ZoneInfoModal zone={zone} onClose={()=>setShowInfo(false)}/>}
+  </div>);
+}
+
+function generateZones(planet){
+  // Derived from continents for backward compat
+  return generateContinents(planet).flatMap(c=>c.zones);
+}
+
+const mix=(a,b,t)=>a.map((v,i)=>Math.round(v*(1-t)+b[i]*t));
+const clamp=(v,mn=0,mx=255)=>Math.max(mn,Math.min(mx,v));
+function genMiniTexture(planet,szArg){
+  const sz=szArg||64,cv=document.createElement("canvas");cv.width=sz;cv.height=sz;
+  const ctx=cv.getContext("2d"),img=ctx.createImageData(sz,sz),d=img.data;
+  const n=noise2d(planet.seed),n2=noise2d(planet.seed+11111);
+  const p=getPlanetPalette(planet),isG=planet.type==="Gazeuse",wl=planet.water/100;
+  const isVolc=planet.type==="Volcanique",isDesert=planet.type==="Désertique",isIce=planet.type==="Glaciale",isOcean=planet.type==="Oceanique"||planet.type==="Océanique",isForest=planet.type==="Forestière"||planet.type==="Forestiere";
+  // ── Compute waterThreshold via percentile pre-sampling ──
+  // Map planet water% to a noise threshold that GUARANTEES the right amount of land,
+  // regardless of Perlin distribution. Cap for ocean planets so land islands are always visible.
+  let waterThreshold=0;
+  if(!isG){
+    let targetWater=wl;
+    // For ocean planets, cap so at least 15% land is visible (matches genSurfaceTexture rule)
+    if(planet.type==="Océanique"||planet.type==="Oceanique")targetWater=Math.min(0.85,Math.max(0.65,wl));
+    // Pre-sample combined elevation on a coarse grid
+    const samples=[];
+    const SS=24;
+    for(let sy=0;sy<SS;sy++){for(let sx=0;sx<SS;sx++){
+      const slon=sx/SS*4,slat=sy/SS*2;
+      const se1=fbm(n,slon,slat,5,2.0,0.52);
+      const se2=fbm(n2,slon*1.3+3,slat*1.3+3,3);
+      samples.push(se1*0.65+se2*0.35);
+    }}
+    samples.sort((a,b)=>a-b);
+    const pi=Math.min(samples.length-1,Math.max(0,Math.floor(samples.length*targetWater)));
+    waterThreshold=samples[pi];
+  }
+  for(let py=0;py<sz;py++){for(let px=0;px<sz;px++){
+    const lon=px/sz*4,lat=py/sz*2;let r,g,b;
+    if(isG){const tb=fbm(n,lon*.7,lat*2.8,4)*.32,bnd=Math.sin((py/sz+tb)*Math.PI*10),t=(bnd+1)/2,det=fbm(n2,lon*1.5+3,lat*4+3,3),mx=t*.6+det*.4,c1=mix(p.b1,p.b2,mx);r=clamp(c1[0]+(det-.5)*25);g=clamp(c1[1]+(det-.5)*20);b=clamp(c1[2]+(det-.5)*12);if(bnd<-.35){r=Math.round(r*.72+p.b3[0]*.28);g=Math.round(g*.72+p.b3[1]*.28);b=Math.round(b*.72+p.b3[2]*.28);}}
+    else{const el=fbm(n,lon,lat,5,2.0,0.52),el2=fbm(n2,lon*1.3+3,lat*1.3+3,3),combined=el*.65+el2*.35;
+    // waterThreshold pre-computed via percentile sampling (see above main loop)
+    const isW=combined<waterThreshold;
+    const pf=Math.abs(py/sz-.5)*2,pb=Math.max(0,(pf-(isIce?0.72:0.92))/.10);
+    if(isW){const shoreRange=Math.max(0.05,1-Math.abs(waterThreshold)*0.5);const sh=Math.pow(Math.max(0,1-(waterThreshold-combined)/shoreRange*2.5),2);
+    if(isOcean){
+      // Deep ocean currents — large-scale banded variation (visible from far)
+      const currN=fbm(n,lon*1.2+13,lat*0.6+7,2);
+      const curr=(currN-0.5)*0.7;
+      // Cloud swirls — turbulent white patches (very visible)
+      const cloudN=fbm(n2,lon*2.0,lat*2.3,4);
+      const cloud=Math.max(0,(cloudN-0.48)*2.4);
+      // Storm cells — bright spiral patches
+      const stormN=fbm(n2,lon*3.2+21,lat*3.2+9,3);
+      const storm=Math.max(0,(stormN-0.72)*3.0);
+      // Tropical algae blooms — greenish patches (rare)
+      const algaeN=fbm(n,lon*1.8+33,lat*1.8+19,2);
+      const algae=Math.max(0,(algaeN-0.68)*1.5);
+      const baseR=p.o[0]*(1+sh*.4+curr);
+      const baseG=p.o[1]*(1+sh*.3+curr);
+      const baseB=p.o[2]*(1+sh*.15+curr*0.4);
+      r=clamp(baseR+cloud*180+storm*100+algae*30);
+      g=clamp(baseG+cloud*190+storm*110+algae*70);
+      b=clamp(baseB+cloud*200+storm*130+algae*20);
+    }else{
+      r=clamp(p.o[0]*(1+sh*.5));g=clamp(p.o[1]*(1+sh*.3));b=clamp(p.o[2]*(1+sh*.1));
+    }
+    }
+    else{const landRange=Math.max(0.1,1-waterThreshold);const h=Math.max(0,(combined-waterThreshold)/landRange),det=fbm(n,lon*4+2,lat*4+2,3)*.5+.5;
+    if(isVolc){
+      // Volcanic terrain — sync'd with genSurfaceTexture logic, using h tiers
+      const flowN=fbm(n,lon*1.6,lat*1.6,4);
+      const fissureN=fbm(n2,lon*3.5+15,lat*3.5+15,4);
+      const craterN=fbm(n,lon*1.2+33,lat*1.2+33,3);
+      const rockVar=fbm(n2,lon*2.5+50,lat*2.5+50,3);
+
+      let br,bg,bb;
+
+      if(h<.32){
+        // VALLEYS: lava streams + dark rock
+        const lavaIntensity=Math.min(1,(0.32-h)/0.32);
+        if(flowN>0){
+          const lm=Math.min(1,flowN*2.0);
+          const baseLavaR=p.l2[0]*(1-lm)+p.lava[0]*lm;
+          const baseLavaG=p.l2[1]*(1-lm)+p.lava[1]*lm;
+          const baseLavaB=p.l2[2]*(1-lm)+p.lava[2]*lm;
+          const darkR=p.l[0]*0.65,darkG=p.l[1]*0.65,darkB=p.l[2]*0.65;
+          br=darkR*(1-lavaIntensity)+baseLavaR*lavaIntensity;
+          bg=darkG*(1-lavaIntensity)+baseLavaG*lavaIntensity;
+          bb=darkB*(1-lavaIntensity)+baseLavaB*lavaIntensity;
+          if(flowN>0.25){
+            const hm=Math.min(1,(flowN-0.25)/0.18)*lavaIntensity*0.8;
+            br=br*(1-hm)+p.hot[0]*hm;
+            bg=bg*(1-hm)+p.hot[1]*hm;
+            bb=bb*(1-hm)+p.hot[2]*hm;
+          }
+        }else{
+          const dv=0.55+rockVar*0.25;
+          br=p.l[0]*dv;bg=p.l[1]*dv;bb=p.l[2]*dv;
+        }
+      }else if(h<.65){
+        // MID: basalt with hot fissures
+        const dv=0.80+rockVar*0.25;
+        br=p.l[0]*dv;bg=p.l[1]*dv;bb=p.l[2]*dv;
+        if(fissureN>0.18){
+          const fm=Math.pow(Math.min(1,(fissureN-0.18)/0.22),1.5)*0.75;
+          br=br*(1-fm)+p.lava[0]*fm;
+          bg=bg*(1-fm)+p.lava[1]*fm;
+          bb=bb*(1-fm)+p.lava[2]*fm;
+          if(fissureN>0.38){
+            const hm=Math.min(1,(fissureN-0.38)/0.12)*0.5;
+            br=br*(1-hm)+p.hot[0]*hm;
+            bg=bg*(1-hm)+p.hot[1]*hm;
+            bb=bb*(1-hm)+p.hot[2]*hm;
+          }
+        }
+      }else{
+        // HIGH: cooled peaks
+        const tier=Math.min(1,(h-0.65)/0.35);
+        const baseR=p.l2[0]*(1-tier)+(p.m?p.m[0]:140)*tier;
+        const baseG=p.l2[1]*(1-tier)+(p.m?p.m[1]:55)*tier;
+        const baseB=p.l2[2]*(1-tier)+(p.m?p.m[2]:15)*tier;
+        const dv=0.85+rockVar*0.20;
+        br=baseR*dv;bg=baseG*dv;bb=baseB*dv;
+        if(fissureN>0.42){
+          const fm=Math.min(1,(fissureN-0.42)/0.10)*0.5;
+          br=br*(1-fm)+p.lava[0]*fm;
+          bg=bg*(1-fm)+p.lava[1]*fm;
+          bb=bb*(1-fm)+p.lava[2]*fm;
+        }
+      }
+
+      // Active calderas (craters with lava cores)
+      if(craterN>.32&&craterN<.50){
+        const rim=Math.abs(craterN-0.41)/0.09;
+        if(rim<0.30){
+          const m=0.85;
+          br=br*(1-m)+p.hot[0]*m;
+          bg=bg*(1-m)+p.hot[1]*m;
+          bb=bb*(1-m)+p.hot[2]*m;
+        }else if(rim<0.75){
+          const m=0.80;
+          br=br*(1-m)+p.lava[0]*m;
+          bg=bg*(1-m)+p.lava[1]*m;
+          bb=bb*(1-m)+p.lava[2]*m;
+        }else{
+          br*=0.4;bg*=0.4;bb*=0.4;
+        }
+      }
+
+      r=clamp(br);g=clamp(bg);b=clamp(bb);
+    }
+    else if(isDesert){
+      // Desert planets have ~0% water, so `h` is uniformly high here, useless for variety.
+      // Compute INDEPENDENT terrain features directly from noise.
+
+      // Sand basins (low areas) vs highlands — large slow variation
+      const elevN=fbm(n,lon*0.9+7,lat*0.9+7,3);   // -0.5..+0.5
+      const elev=elevN+0.5; // 0..1, our actual altitude proxy
+      // Large-scale dune fields — long parallel sand ridges
+      const duneN=fbm(n,lon*1.6+5,lat*0.5+5,3);
+      const dune=(duneN-0.5)*1.4;
+      // Rocky highlands — darker rust patches (visible orbital feature)
+      const rockN=fbm(n2,lon*1.4+11,lat*1.4+11,3);
+      const rock=Math.max(0,(rockN-0.50)*2.2);
+      // Canyon networks — dark fissures
+      const canyonN=fbm(n,lon*2.6+19,lat*2.6+19,4);
+      const canyon=Math.max(0,(canyonN-0.58)*2.6);
+      // Salt flats — bright pale patches
+      const saltN=fbm(n2,lon*1.6+27,lat*1.6+27,2);
+      const salt=Math.max(0,(saltN-0.62)*2.0);
+      // Rare oases — dark green specks
+      const oasisN=fbm(n,lon*5.0+35,lat*5.0+35,2);
+      const oasis=Math.max(0,(oasisN-0.78)*3.5);
+
+      // Three-tier terrain coloring based on independent elev
+      if(elev>0.65){
+        // Highlands: rusty mountains (palette m) blending up to ridges
+        const tier=Math.min(1,(elev-0.65)/0.35);
+        const sc=mix(p.l2,p.m,tier);
+        r=clamp(sc[0]*(0.85+det*0.3)-canyon*50);
+        g=clamp(sc[1]*(0.75+det*0.3)-canyon*45);
+        b=clamp(sc[2]*(0.7+det*0.3)-canyon*30);
+      }else if(elev>0.35){
+        // Mid-elevation: classic sand/dune zone (palette l + l2 mix)
+        const tier=(elev-0.35)/0.30;
+        const sc=mix(p.l,p.l2,tier);
+        r=clamp(sc[0]*(1+dune*0.18)-rock*45-canyon*55+salt*60);
+        g=clamp(sc[1]*(1+dune*0.15)-rock*55-canyon*50+salt*55);
+        b=clamp(sc[2]*(1+dune*0.08)-rock*35-canyon*35+salt*50);
+      }else{
+        // Low basins: deeper warm sand color, more dune contrast (palette l darkened)
+        const dk=0.75+elev*0.5;
+        r=clamp(p.l[0]*dk*(1+dune*0.22)+salt*70-canyon*40+oasis*-30);
+        g=clamp(p.l[1]*dk*(1+dune*0.18)+salt*65-canyon*30+oasis*25);
+        b=clamp(p.l[2]*dk*(1+dune*0.10)+salt*55-canyon*20+oasis*-25);
+      }
+      // Subtle wisps of dust storms (large translucent veils)
+      const dustN=fbm(n2,lon*2.0+45,lat*2.0+45,3);
+      const dust=Math.max(0,(dustN-0.55)*1.4);
+      r=clamp(r+dust*55);g=clamp(g+dust*42);b=clamp(b+dust*22);
+    }
+    else if(isForest){
+      // Canopy variation — large dense forest patches vs clearings
+      const canopyN=fbm(n2,lon*1.8+5,lat*1.8+5,3);
+      const canopy=(canopyN-0.5)*0.6;
+      // High-altitude vegetation breaks (mountain peaks)
+      if(h>.7){const sc=mix(p.l2,p.s,Math.min(1,(h-.7)/.20));r=sc[0];g=sc[1];b=sc[2];}
+      else if(h>.35){
+        const sc=mix(p.l,p.l2,(h-.35)/.35);
+        r=clamp(sc[0]*(det*.5+.7+canopy*0.3));
+        g=clamp(sc[1]*(det*.5+.7+canopy*0.5));
+        b=clamp(sc[2]*(det*.5+.7+canopy*0.2));
+      }else{
+        // Dense forest floor with brightness variation
+        r=clamp(p.l[0]*(det*.5+.8+canopy*0.4));
+        g=clamp(p.l[1]*(det*.5+.8+canopy*0.6));
+        b=clamp(p.l[2]*(det*.5+.8+canopy*0.3));
+      }
+      // Cloud cover overlay — common on forest planets (high humidity)
+      const cloudN=fbm(n,lon*2.4+33,lat*2.4+15,3);
+      const cloud=Math.max(0,(cloudN-0.55)*1.8);
+      r=clamp(r+cloud*150);g=clamp(g+cloud*155);b=clamp(b+cloud*160);
+    }
+    else{if(h>.75){const sc=mix(p.l2,p.s,Math.min(1,(h-.75)/.15));r=sc[0];g=sc[1];b=sc[2];}
+    else if(h>.4){const sc=mix(p.l,p.l2,(h-.4)/.35);r=clamp(sc[0]*(det*.5+.5));g=clamp(sc[1]*(det*.5+.5));b=clamp(sc[2]*(det*.5+.5));}
+    else{r=clamp(p.l[0]*(det*.4+.6));g=clamp(p.l[1]*(det*.4+.6));b=clamp(p.l[2]*(det*.4+.6));}}}
+    if(pb>0&&planet.type!=="Volcanique"){const ic=mix([r,g,b],p.s,Math.min(pb*0.8,0.85));r=ic[0];g=ic[1];b=ic[2];}
+    }
+    const idx=(py*sz+px)*4;d[idx]=clamp(r);d[idx+1]=clamp(g);d[idx+2]=clamp(b);d[idx+3]=255;
+  }}ctx.putImageData(img,0,0);return cv;
+}
+function genNebulaTexture(seed,sz=1024){
+  // Equirectangular projection: width = 2 * height so 1 pixel = 1 degree
+  // Use cylFbm (cyclical in longitude) to eliminate the seam.
+  const W=sz*2,H=sz;
+  const cv=document.createElement("canvas");cv.width=W;cv.height=H;
+  const ctx=cv.getContext("2d"),img=ctx.createImageData(W,H),d=img.data;
+  const n1=noise2d(seed),n2=noise2d(seed+7777),n3=noise2d(seed+12345),n4=noise2d(seed+54321);
+  const themes=[
+    {r:[80,35,180],g:[25,15,120],b:[110,60,200],accent:[255,120,200]}, // purple/magenta
+    {r:[30,90,160],g:[15,45,130],b:[60,130,220],accent:[120,200,255]}, // blue/cyan
+    {r:[180,60,40],g:[40,20,15],b:[80,30,80],accent:[255,140,80]},     // crimson/orange
+    {r:[30,140,80],g:[15,70,50],b:[50,100,130],accent:[100,255,180]},  // emerald/teal
+    {r:[200,120,40],g:[80,40,20],b:[60,30,90],accent:[255,200,100]},   // amber/gold
+    {r:[140,40,120],g:[40,20,80],b:[120,60,180],accent:[255,160,255]}, // pink/violet
+  ];
+  const th=themes[seed%themes.length];
+  for(let py=0;py<H;py++){
+    // Latitude in [0, PI] where 0=north pole, PI=south pole
+    const phi=(py/H)*Math.PI;
+    // Softer polar attenuation (pow 0.5) — still prevents pinching but keeps nebula visible closer to poles
+    const polar=Math.pow(Math.sin(phi),0.5);
+    // latVal in [0, 2] — used as a second-axis perturbation in cylFbm
+    const latVal=py/H*2;
+    for(let px=0;px<W;px++){
+      // Longitude in [0, 2*PI] — cyclic
+      const theta=(px/W)*Math.PI*2;
+      // Layered noise, all cyclic in longitude
+      const n=cylFbm(n1,0.9,latVal,6,2.0,0.55,theta);
+      const n_=cylFbm(n2,1.5,latVal+n*.8,5,2.1,0.5,theta,3,3);
+      const density=Math.max(0,n_*.7+.45)*polar;
+      const filament=cylFbm(n3,1.5,latVal,4,2.0,0.5,theta,2,2)*.5+.5;
+      const hotspot=Math.pow(Math.max(0,cylFbm(n4,0.8,latVal,3,2.0,0.5,theta,5,5)),3)*1.8*polar;
+      const alpha=Math.pow(density,1.6)*filament*0.75+hotspot*0.55;
+      let r=th.r[0]+density*(th.r[1]-th.r[0])+filament*(th.r[2]-th.r[1]);
+      let g=th.g[0]+density*(th.g[1]-th.g[0])+filament*(th.g[2]-th.g[1]);
+      let b=th.b[0]+density*(th.b[1]-th.b[0])+filament*(th.b[2]-th.b[1]);
+      r+=hotspot*(th.accent[0]-r)*0.6;
+      g+=hotspot*(th.accent[1]-g)*0.6;
+      b+=hotspot*(th.accent[2]-b)*0.6;
+      const idx=(py*W+px)*4;
+      d[idx]=clamp(r,0,255);d[idx+1]=clamp(g,0,255);d[idx+2]=clamp(b,0,255);
+      d[idx+3]=Math.round(Math.min(1,alpha)*255);
+    }
+  }
+  ctx.putImageData(img,0,0);
+  return cv;
+}
+function getPlanetPalette(planet){
+  const v=planet.colorVar,t=planet.type;
+  if(t==="Tellurique"){const i=Math.floor(v*4)%4;const os=[[12,55,155],[15,80,120],[20,60,130],[8,45,100]];const ls=[[50,95,40],[80,100,30],[60,80,50],[40,90,60]];const l2s=[[90,135,55],[120,130,40],[80,120,70],[100,110,50]];return{o:os[i],l:ls[i],l2:l2s[i],m:[130+Math.round(v*30),110+Math.round(v*20),75],s:[230,238,245],beach:[210,190,140]};}
+  if(t==="Gazeuse"){const vs=[{b1:[198,132,48],b2:[232,182,92],b3:[158,92,28],st:[255,238,195]},{b1:[200,175,130],b2:[225,210,165],b3:[170,140,90],st:[255,248,220]},{b1:[70,120,200],b2:[100,160,240],b3:[40,80,160],st:[180,220,255]},{b1:[180,80,120],b2:[220,130,170],b3:[140,50,80],st:[255,200,220]},{b1:[160,60,40],b2:[210,100,70],b3:[120,40,20],st:[255,180,150]}];return vs[Math.floor(v*5)%5];}
+  if(t==="Glaciale")return{o:[25,75,135],l:[140,170,195],l2:[200,220,235],m:[228,240,250],s:[250,252,255],beach:[175,195,210]};
+  if(t==="Désertique"){const i=Math.floor(v*3)%3;const os=[[185,148,52],[160,80,40],[200,120,30]];const ls=[[208,165,70],[190,110,60],[225,150,50]];const l2s=[[245,210,135],[230,160,90],[250,195,100]];const ms=[[120,70,30],[110,55,35],[140,80,25]];const beaches=[[175,140,85],[165,95,60],[195,130,70]];return{o:os[i],l:ls[i],l2:l2s[i],m:ms[i],s:[245,225,170],beach:beaches[i]};}
+  if(t==="Océanique"){const i=Math.floor(v*3)%3;const os=[[5,38,162],[0,60,130],[20,30,160]];const ls=[[45,115,55],[80,130,70],[35,95,45]];const l2s=[[95,155,75],[135,170,100],[80,145,70]];return{o:os[i],l:ls[i],l2:l2s[i],m:[150,140,90],s:[245,235,200],beach:[225,205,150]};}
+  if(t==="Volcanique"){
+    // Weighted variants: 80% classic feu/lave, 20% exotic
+    // v ranges 0..1 — first 0.27 = inferno, 0.27..0.54 = magma, 0.54..0.81 = hellworld,
+    // 0.81..0.91 = sulfur (10%), 0.91..1.0 = obsidian (9%)
+    let i;
+    if(v<0.27)i=0;       // inferno (classic black + orange)
+    else if(v<0.54)i=2;  // magma (deep red)
+    else if(v<0.81)i=4;  // hellworld (red brick)
+    else if(v<0.91)i=1;  // sulfur (rare exotic)
+    else i=3;            // obsidian (rarest exotic)
+    const variants=[
+      {l:[28,18,12],l2:[88,42,22],lava:[255,90,15],hot:[255,200,100],name:"inferno"},
+      {l:[40,32,20],l2:[110,90,40],lava:[255,200,30],hot:[255,240,150],name:"sulfur"},
+      {l:[18,12,12],l2:[70,30,28],lava:[200,40,20],hot:[255,150,80],name:"magma"},
+      {l:[8,10,6],l2:[28,40,12],lava:[120,220,50],hot:[200,255,140],name:"obsidian"},
+      {l:[35,15,8],l2:[180,80,30],lava:[255,120,30],hot:[255,220,140],name:"hellworld"}
+    ];
+    const v0=variants[i];
+    return{o:[20,10,8],l:v0.l,l2:v0.l2,lava:v0.lava,hot:v0.hot,m:[140,55,15],s:[220,170,110],beach:[80,40,25],volcVariant:i};
+  }
+  if(t==="Forestière"){const i=Math.floor(v*3)%3;const ls=[[15,55,18],[12,70,25],[40,55,12]];const l2s=[[65,140,50],[55,165,70],[130,150,40]];return{o:[15,62,128],l:ls[i],l2:l2s[i],m:[105,125,70],s:[215,230,200],si:[82,138,50],beach:[195,175,125]};}
+  return{o:[40,80,120],l:[80,80,80],l2:[120,120,120],m:[160,160,160],s:[220,220,220]};
+}
+function genSurfaceTexture(planet,sz=1024){
+  const cv=document.createElement("canvas");cv.width=sz;cv.height=sz;
+  const ctx=cv.getContext("2d"),img=ctx.createImageData(sz,sz),d=img.data;
+  const n=noise2d(planet.seed),n2=noise2d(planet.seed+11111);
+  const p=getPlanetPalette(planet),wl=planet.water/100,isG=planet.type==="Gazeuse";
+  const isIce=planet.type==="Glaciale";
+  // PERCENTILE-BASED THRESHOLD: pre-sample elevation over a coarse grid
+  // then use the Nth percentile as water threshold -> guarantees exact % of land
+  // This eliminates seed-based "lucky/unlucky" variance
+  let seaLevel=wl;
+  if(!isG){
+    const samples=[];
+    const SS=48; // 48x48 pre-sample grid (quick)
+    for(let sy=0;sy<SS;sy++){
+      for(let sx=0;sx<SS;sx++){
+        const ts=(sx/SS)*Math.PI*2;
+        const lats=sy/SS*2;
+        const e1=cylFbm(n,.9,lats,7,2.0,0.52,ts);
+        const e2=cylFbm(n2,1.5,lats,5,2.0,0.5,ts,3,3);
+        const e3=cylFbm(n,2.2,lats,5,2.3,0.55,ts,17,17);
+        let c=e1*.6+e2*.4;
+        c=0.5+c*1.2;
+        c=Math.max(0,Math.min(1,c));
+        if(wl>0.5){c=c+Math.max(0,e3-.05)*.6;}
+        samples.push(c);
+      }
+    }
+    samples.sort((a,b)=>a-b);
+    // Target land percentage based on planet type:
+    // - Océanique: min 15% land (max water 85%)
+    // - Glaciale: min 20% land (max water 80%)
+    // - Volcanique: min 80% land (ensures strong variety of terrain)
+    // - Désertique/Forestière/Tellurique: use wl as-is (but clamp)
+    let targetLandPct;
+    if(planet.type==="Océanique") targetLandPct=Math.max(0.15,Math.min(0.35,1-wl));
+    else if(planet.type==="Glaciale") targetLandPct=Math.max(0.20,Math.min(0.45,1-wl));
+    else if(planet.type==="Volcanique") targetLandPct=Math.max(0.80,1-wl);
+    else targetLandPct=Math.max(0.25,1-wl);
+    // Use the percentile as the threshold -> guarantees exactly targetLandPct land
+    const idx=Math.floor((1-targetLandPct)*samples.length);
+    seaLevel=samples[Math.max(0,Math.min(samples.length-1,idx))];
+  }
+  for(let py=0;py<sz;py++){for(let px=0;px<sz;px++){
+    // theta is longitude in radians (cyclic) for seamless wrapping
+    const theta=(px/sz)*Math.PI*2;
+    const lat=py/sz*2;
+    const lon=px/sz*4;
+    let r,g,b;
+    if(isG){
+      // Gas giants: banded + more pronounced detail noise for textured look
+      const tb=cylFbm(n,.7,lat,6,2.0,0.5,theta)*.32,bnd=Math.sin((py/sz+tb)*Math.PI*12),t=(bnd+1)/2;
+      const det=cylFbm(n2,2,lat,5,2.0,0.5,theta,3,3),det2=cylFbm(n,6,lat,4,2.0,0.5,theta,7,7);
+      const mx=t*.55+det*.45,c1=mix(p.b1,p.b2,mx);
+      // Stronger variation for banded texture
+      const varAmp=(det-.5)*50+(det2-.5)*30;
+      r=clamp(c1[0]+varAmp);g=clamp(c1[1]+varAmp*.8);b=clamp(c1[2]+varAmp*.6);
+      if(bnd<-.4){r=Math.round(r*.7+p.b3[0]*.3);g=Math.round(g*.7+p.b3[1]*.3);b=Math.round(b*.7+p.b3[2]*.3);}
+    }else{
+      // Continental landmass generation with multi-octave noise (like real planet terrain)
+      const el=cylFbm(n,.9,lat,7,2.0,0.52,theta),el2=cylFbm(n2,1.5,lat,5,2.0,0.5,theta,3,3);
+      // Archipelago noise layer - stronger for ocean-heavy planets
+      const el3=cylFbm(n,2.2,lat,5,2.3,0.55,theta,17,17);
+      // Base combined elevation; the noise is roughly gaussian-distributed
+      let combined=el*.6+el2*.4;
+      // Remap to [0,1] via sigmoid-like curve - spreads the distribution more uniformly
+      // Raw combined ~ N(0, 0.22); we want nearly-uniform distribution on [0,1]
+      // This transform makes wl directly correspond to "% water" meaningfully
+      combined=0.5+combined*1.2;
+      combined=Math.max(0,Math.min(1,combined));
+      // For ocean-heavy planets, add strong archipelago hotspots so islands emerge
+      if(wl>0.5){
+        // Strong boost where archipelago noise is high -> defined islands
+        const archBoost=Math.max(0,el3-.05)*.6;
+        combined=combined+archBoost;
+      }
+      // Use the precomputed percentile-based threshold (guarantees correct land %)
+      const wlEff=seaLevel;
+      // Detail noise at multiple scales — captures ridges, plateaus, erosion
+      const det=cylFbm(n,5,lat,4,2.0,0.5,theta,2,2)*.5+.5;            // small-scale texture
+      const det2=cylFbm(n2,12,lat,3,2.0,0.5,theta,5,5)*.5+.5;         // high-freq grain
+      const det3=cylFbm(n,2.5,lat,4,2.0,0.5,theta,8,8)*.5+.5;         // mid-freq mountain ridges
+      const det4=cylFbm(n2,1.2,lat,5,2.0,0.5,theta,9,9)*.5+.5;        // low-freq biome zones
+      const isW=combined<wlEff;
+      const pf=Math.abs(py/sz-.5)*2,pb=Math.max(0,(pf-(isIce?0.72:0.92))/.10);
+      // Strong relief: darker valleys, brighter peaks, with mid-freq ridges
+      const detMod=det*.35+det2*.25+det3*.40;
+      const relief=(detMod-.5)*0.85+1;  // stronger contrast for more visible relief
+      // Biome variation — large-scale color shift
+      const biome=(det4-.5)*0.25;
+      if(isW){
+        // Ocean/ice: strong visible variation for depth, currents, and shallow zones
+        const depth=Math.pow(Math.max(0,1-(wlEff-combined)/Math.max(wlEff,.01)*2.5),2);
+        // Shallow waters near coast are lighter; deep waters darker (wider coastal band)
+        const coastProximity=Math.max(0,1-(wlEff-combined)/0.15);
+        // Strong current pattern — uses multiple noise scales for streaks and swirls
+        const currents=(det2-.5)*0.55+(det3-.5)*0.45+(det-.5)*0.30;
+        // Deep ocean much darker than surface for strong contrast
+        const deepColor=[Math.max(0,p.o[0]*0.4),Math.max(0,p.o[1]*0.45),Math.max(0,p.o[2]*0.55)];
+        // Shallow/coastal zones much lighter (almost sky blue reflection)
+        const shallowColor=[Math.min(255,p.o[0]*1.35+40),Math.min(255,p.o[1]*1.35+50),Math.min(255,p.o[2]*1.25+30)];
+        // Mix deep-to-surface based on depth, then add shallow overlay near coasts
+        let oc=mix(deepColor,p.o,Math.min(1,depth*1.8));
+        if(coastProximity>0){
+          oc=mix(oc,shallowColor,Math.min(1,coastProximity*0.9));
+        }
+        // Apply current variation as a strong brightness factor
+        const oceanRelief=1+currents*0.65;
+        r=clamp(oc[0]*oceanRelief);
+        g=clamp(oc[1]*oceanRelief);
+        b=clamp(oc[2]*oceanRelief);
+        // For Glaciale: add icy white streaks where mid-noise is high (floating ice)
+        if(isIce&&det3>0.62){
+          const iceAmt=Math.min(1,(det3-0.62)/0.20);
+          r=clamp(r*(1-iceAmt*0.7)+240*iceAmt*0.9);
+          g=clamp(g*(1-iceAmt*0.7)+248*iceAmt*0.9);
+          b=clamp(b*(1-iceAmt*0.7)+252*iceAmt*0.9);
+        }
+      }else{
+        const h=Math.max(0,(combined-wlEff)/Math.max(1-wlEff,.01));
+        // Choose base color by elevation tier
+        let bc;
+        if(planet.type==="Volcanique"){
+          // Volcanic terrain — use INDEPENDENT elevation noise (water-based h is compressed here)
+          // Main lava flow noise — large rivers
+          const lavaFlow=cylFbm(n,2.2,lat,4,2.0,0.5,theta,7,7);
+          // Detailed fissures — narrow cracks
+          const fissures=cylFbm(n2,4.5,lat,5,2.1,0.5,theta,17,17);
+          // Crater pattern — sparse circular features
+          const craterNoise=cylFbm(n,1.3,lat,3,2.0,0.5,theta,29,29);
+          // Subtle rock variation
+          const rockVar=cylFbm(n2,3.0,lat,4,2.0,0.5,theta,41,41);
+          // INDEPENDENT volcanic elevation — decouples terrain tiers from water threshold
+          const volcElev=cylFbm(n,1.7,lat,4,2.0,0.5,theta,53,53);
+          // Map fbm range [-0.5, +0.5] to [0, 1] for clean tier comparisons
+          const volcH=Math.max(0,Math.min(1,volcElev+0.5));
+
+          // Use absolute noise values so distribution stays consistent across planets.
+          // fbm output here is roughly [-0.5, 0.5]. Use small offset thresholds that GUARANTEE coverage.
+
+          if(volcH<.32){
+            // VALLEYS: lava streams + dark cooled rock
+            const lavaIntensity=Math.min(1,(0.32-volcH)/0.32);
+            if(lavaFlow>0){
+              // Lava channels — graded brightness
+              const lm=Math.min(1,lavaFlow*2.0);
+              const baseLava=mix(p.l2,p.lava,lm);
+              bc=mix([p.l[0]*0.65,p.l[1]*0.65,p.l[2]*0.65],baseLava,lavaIntensity);
+              // White-hot cores at brightest spots
+              if(lavaFlow>0.25){
+                const hm=Math.min(1,(lavaFlow-0.25)/0.18);
+                bc=mix(bc,p.hot||[255,220,140],hm*lavaIntensity*0.8);
+              }
+            }else{
+              // Dark cooled rock in negative-noise valleys
+              const dv=0.55+rockVar*0.25;
+              bc=[p.l[0]*dv,p.l[1]*dv,p.l[2]*dv];
+            }
+          }else if(volcH<.65){
+            // MID: basalt rock with abundant hot fissures
+            const dv=0.80+rockVar*0.25;
+            bc=[p.l[0]*dv,p.l[1]*dv,p.l[2]*dv];
+            if(fissures>0.18){
+              const fm=Math.pow(Math.min(1,(fissures-0.18)/0.22),1.5);
+              bc=mix(bc,p.lava,fm*0.75);
+              if(fissures>0.38){
+                const hm=Math.min(1,(fissures-0.38)/0.12);
+                bc=mix(bc,p.hot||p.lava,hm*0.5);
+              }
+            }
+          }else{
+            // HIGH: cooled volcanic peaks with mineral deposits
+            const tier=Math.min(1,(volcH-0.65)/0.35);
+            bc=mix(p.l2,p.m||[140,55,15],tier);
+            const dv=0.85+rockVar*0.20;
+            bc=[bc[0]*dv,bc[1]*dv,bc[2]*dv];
+            // Even high peaks have rare lava vents
+            if(fissures>0.42){
+              const fm=Math.min(1,(fissures-0.42)/0.10);
+              bc=mix(bc,p.lava,fm*0.5);
+            }
+          }
+
+          // VOLCANIC CRATERS: scattered active calderas with bright lava lakes
+          // Wider threshold band so they're visible on every planet
+          const cn=craterNoise;
+          if(cn>.32&&cn<.50){
+            const rim=Math.abs(cn-0.41)/0.09; // 0 at center, 1 at edges
+            if(rim<0.30){
+              // Hot core
+              bc=mix(bc,p.hot||p.lava,0.85);
+            }else if(rim<0.75){
+              // Lava lake
+              bc=mix(bc,p.lava,0.80);
+            }else{
+              // Scorched rim
+              bc=[bc[0]*0.4,bc[1]*0.4,bc[2]*0.4];
+            }
+          }
+
+          // Clamp final
+          bc=[Math.min(255,Math.max(0,Math.round(bc[0]))),Math.min(255,Math.max(0,Math.round(bc[1]))),Math.min(255,Math.max(0,Math.round(bc[2])))];
+        }else if(planet.type==="Désertique"){
+          // Desert: dune patterns, canyons, mesas, and salt flats for rich variety
+          // Use multiple noise scales to simulate wind-sculpted terrain
+          const duneNoise=cylFbm(n,4.5,lat,5,2.1,0.5,theta,3,3);     // dune ridges
+          const canyonNoise=cylFbm(n2,2.8,lat,4,2.0,0.55,theta,11,11); // canyons/mesas
+          const flatNoise=cylFbm(n,1.5,lat,3,2.0,0.5,theta,21,21);    // salt flats/plateaus
+          // Define extra colors for richer variation
+          const darkDune=[Math.max(0,p.l[0]*0.55),Math.max(0,p.l[1]*0.55),Math.max(0,p.l[2]*0.55)];
+          const lightDune=p.l2||p.l;
+          const saltFlat=[Math.min(255,p.s[0]*0.95+25),Math.min(255,p.s[1]*0.95+20),Math.min(255,p.s[2]*0.92+15)];
+          const canyonRed=[Math.min(255,p.l[0]*1.1+30),Math.max(0,p.l[1]*0.75),Math.max(0,p.l[2]*0.55)];
+          if(h>0.80){
+            // High mesas/peaks: brighter with canyon red tones
+            const mm=Math.min(1,(h-0.80)/0.15);
+            bc=mix(lightDune,mix(canyonRed,p.s,0.3),mm);
+          }else if(canyonNoise>0.22&&h>0.15){
+            // Canyon walls: reddish stratified rock
+            const cm=Math.min(1,(canyonNoise-0.22)/0.15);
+            bc=mix(p.l,canyonRed,cm*0.7);
+          }else if(flatNoise<-0.25&&h<0.35){
+            // Salt flats / dry lake beds: very light, almost white patches
+            const sm=Math.min(1,(-flatNoise-0.25)/0.15);
+            bc=mix(p.l2||p.l,saltFlat,sm*0.85);
+          }else if(h>0.45){
+            // Mid-upper dunes with ridge detail
+            const dm=(duneNoise-0.5)*0.8+0.5;
+            bc=mix(p.l,lightDune,Math.min(1,dm*0.9+(h-0.45)/0.35));
+          }else if(h>0.15){
+            // Mid-lower: dune fields with strong variation
+            const dm=(duneNoise-0.5)*0.7+0.5;
+            bc=mix(darkDune,p.l,0.5+dm*0.5);
+          }else{
+            // Low areas: darker sand / oases
+            bc=mix(darkDune,p.beach||p.l,0.4+h*2);
+          }
+        }else if(h>.82){
+          // High peaks / snow caps
+          bc=mix(p.l2||p.l,p.s,Math.min(1,(h-.82)/.13));
+        }else if(h>.55){
+          // Mountain zone — strong contrast between l and l2
+          const mc=mix(p.l,p.l2||p.l,(h-.55)/.27);
+          bc=mc;
+        }else if(h>.28){
+          // Mid-elevation plains — lightly mix to l2 based on biome
+          const mc=mix(p.l,p.l2||p.l,0.35+biome*0.4);
+          bc=mc;
+        }else if(h>.06){
+          // Low plains / grassland
+          bc=mix(p.beach||p.l,p.l,0.45);
+        }else{
+          // Coast / beach
+          bc=p.beach||p.l;
+        }
+        // Apply relief modulation with additional biome-based hue shift
+        const biomeShift=biome*18;  // subtle color temperature shift per region
+        r=clamp(bc[0]*relief+biomeShift);
+        g=clamp(bc[1]*relief+biomeShift*.5);
+        b=clamp(bc[2]*relief-biomeShift*.5);
+      }
+      if(pb>0&&planet.type!=="Volcanique"){const ic=mix([r,g,b],p.s,Math.min(pb*0.8,0.85));r=ic[0];g=ic[1];b=ic[2];}
+    }
+    const idx=(py*sz+px)*4;d[idx]=clamp(r);d[idx+1]=clamp(g);d[idx+2]=clamp(b);d[idx+3]=255;
+  }}
+  ctx.putImageData(img,0,0);return cv;
+}
+function genCloudTexture(planet,sz=512){
+  const cv=document.createElement("canvas");cv.width=sz;cv.height=sz;
+  const ctx=cv.getContext("2d"),img=ctx.createImageData(sz,sz),d=img.data;
+  const n=noise2d(planet.seed+55555),n2=noise2d(planet.seed+66666);
+  for(let py=0;py<sz;py++){for(let px=0;px<sz;px++){
+    const u=px/sz*3.5,v=py/sz*2;
+    const c1=fbm(n,u,v,6,2.2,0.55),c2=fbm(n2,u*1.5+2,v*1.5+2,4,2.0,0.5);
+    const cloud=c1*.7+c2*.3,thresh=1-planet.clouds;
+    const alpha=Math.max(0,Math.min(1,(cloud-thresh)/.15));
+    const poleFade=Math.pow(Math.sin(Math.abs(py/sz-.5)*Math.PI*1.8),.3);
+    const idx=(py*sz+px)*4;d[idx]=255;d[idx+1]=255;d[idx+2]=255;d[idx+3]=Math.round(alpha*poleFade*230);
+  }}
+  ctx.putImageData(img,0,0);return cv;
+}
+function genRingTexture(planet){
+  const cv=document.createElement("canvas");cv.width=128;cv.height=1;
+  const ctx=cv.getContext("2d"),img=ctx.createImageData(128,1),d=img.data;
+  const rb=planet.colorVar>0.4?[180,210,240]:[210,180,120];
+  for(let px=0;px<128;px++){const t=px/128,b=Math.sin(t*Math.PI*16)*.5+.5,ef=Math.min(t*5,1)*Math.min((1-t)*5,1);const a=b*ef;const idx=px*4;d[idx]=rb[0];d[idx+1]=rb[1];d[idx+2]=rb[2];d[idx+3]=Math.round(a*200);}
+  ctx.putImageData(img,0,0);return cv;
+}
+const BUILDINGS=[
+  {id:"qg",name:"Quartier General",icon:"🏛️",base:{metal:800,crystal:400,deut:200},factor:3.0,produces:"qg",terrainBonus:["plain","coast","desert","mountain","forest","volcano"],desc:"Centre de commandement de votre planète. Débloque de nouvelles possibilités selon son niveau."},
+  {id:"mine_metal",name:"Mine de Metal",icon:"⛏️",base:{metal:60,crystal:15,deut:0},factor:1.5,produces:"metal",terrainBonus:["mountain","volcano","desert"],desc:"Extrait du métal du sous-sol. Plus le niveau est élevé, plus la production est importante."},
+  {id:"mine_crystal",name:"Mine de Cristal",icon:"💎",base:{metal:48,crystal:24,deut:0},factor:1.6,produces:"crystal",terrainBonus:["mountain","plain","forest"],desc:"Extrait des cristaux énergétiques. Le cristal est essentiel pour la construction avancée et les vaisseaux."},
+  {id:"synth_deut",name:"Synthetiseur",icon:"⚗️",base:{metal:225,crystal:75,deut:0},factor:1.5,produces:"deut",terrainBonus:["coast","plain"],desc:"Synthétise du deutérium. Carburant indispensable pour les flottes et les technologies avancées."},
+  {id:"centrale",name:"Centrale Solaire",icon:"☀️",base:{metal:75,crystal:30,deut:0},factor:1.5,produces:"energy",terrainBonus:["desert","volcano","tundra"],desc:"Génère de l'énergie. Sans énergie suffisante, vos mines fonctionnent au ralenti."},
+  {id:"usine_robots",name:"Usine Robots",icon:"🤖",base:{metal:400,crystal:120,deut:40},factor:2.0,produces:"speed",terrainBonus:["plain","mountain","forest"],desc:"Accélère la construction de tous les autres bâtiments. Chaque niveau réduit le temps de construction."},
+  {id:"hangar",name:"Hangar",icon:"🚀",base:{metal:400,crystal:200,deut:100},factor:2.0,produces:"ships",terrainBonus:["coast","plain"],desc:"Permet la construction de vaisseaux. Le niveau débloque de nouveaux types de vaisseaux plus puissants."},
+  {id:"laboratoire",name:"Laboratoire",icon:"🔬",base:{metal:600,crystal:800,deut:200},factor:1.8,produces:"research",terrainBonus:[],desc:"Permet de mener des recherches technologiques. Chaque niveau accélère la vitesse de recherche."},
+];
+// ── TECHNOLOGIES — research tree (Laboratoire required) ──
+const TECHNOLOGIES=[
+  {id:"tech_extraction",name:"Extraction Optimisée",icon:"⛏️",desc:"Améliore les techniques d'extraction du métal. +5% de production par niveau.",branch:null,maxLevel:10,cost:{metal:800,crystal:400,deut:0},factor:1.6,timeBase:120,effect:0.05,effectKey:"metalProd"},
+  {id:"tech_crystal",name:"Cristallographie",icon:"💎",desc:"Étude de la structure des cristaux. +5% de production de cristal par niveau.",branch:null,maxLevel:10,cost:{metal:600,crystal:600,deut:0},factor:1.6,timeBase:120,effect:0.05,effectKey:"crystalProd"},
+  {id:"tech_logistics",name:"Logistique Étendue",icon:"📦",desc:"Optimise les entrepôts. +10% de stockage par niveau.",branch:null,maxLevel:8,cost:{metal:1000,crystal:500,deut:200},factor:1.7,timeBase:180,effect:0.10,effectKey:"storage"},
+  {id:"tech_colonization",name:"Technologie de Colonisation",icon:"🌱",desc:"Permet de construire des Vaisseaux Colonisateurs pour fonder des colonies sur les planètes sauvages. Prérequis obligatoire pour toute expansion.",branch:null,maxLevel:1,cost:{metal:5000,crystal:3500,deut:1500},factor:1,timeBase:900,effect:1,effectKey:"colonization",labRequired:3},
+  {id:"tech_recycling",name:"Recyclage",icon:"♻️",desc:"Récupère des matériaux. −2% du coût des bâtiments par niveau.",branch:"eco",maxLevel:8,cost:{metal:1500,crystal:1000,deut:300},factor:1.8,timeBase:240,effect:0.02,effectKey:"buildCost",labRequired:2},
+  {id:"tech_geothermal",name:"Géothermie",icon:"⚡",desc:"Exploite la chaleur planétaire. +5% d'énergie par niveau.",branch:"eco",maxLevel:10,cost:{metal:800,crystal:800,deut:200},factor:1.6,timeBase:180,effect:0.05,effectKey:"energyProd",labRequired:4},
+  {id:"tech_distillation",name:"Distillation",icon:"⚗️",desc:"Raffinage du deutérium. +5% de production par niveau.",branch:"eco",maxLevel:10,cost:{metal:600,crystal:800,deut:100},factor:1.6,timeBase:180,effect:0.05,effectKey:"deutProd",labRequired:6},
+  {id:"tech_weapons",name:"Armement Renforcé",icon:"🗡️",desc:"Améliore l'attaque des vaisseaux. +3% par niveau.",branch:"mil",maxLevel:10,cost:{metal:1500,crystal:1000,deut:500},factor:1.7,timeBase:200,effect:0.03,effectKey:"shipAttack",labRequired:2},
+  {id:"tech_armor",name:"Blindage Composite",icon:"🛡️",desc:"Renforce la défense des vaisseaux. +3% par niveau.",branch:"mil",maxLevel:10,cost:{metal:1000,crystal:1500,deut:500},factor:1.7,timeBase:200,effect:0.03,effectKey:"shipDefense",labRequired:4},
+  {id:"tech_tactics",name:"Tactiques Optimisées",icon:"🔧",desc:"Production de vaisseaux plus efficace. −2% du coût par niveau.",branch:"mil",maxLevel:8,cost:{metal:2000,crystal:1500,deut:800},factor:1.8,timeBase:280,effect:0.02,effectKey:"shipCost",labRequired:6},
+  {id:"tech_hyperdrive",name:"Hyperpropulsion",icon:"🚀",desc:"Améliore les moteurs. +4% de vitesse de flotte par niveau.",branch:"exp",maxLevel:10,cost:{metal:1200,crystal:1500,deut:600},factor:1.7,timeBase:220,effect:0.04,effectKey:"fleetSpeed",labRequired:2},
+  {id:"tech_sensors",name:"Capteurs Longue Portée",icon:"📡",desc:"Étend la portée de scan. +1 case par niveau.",branch:"exp",maxLevel:5,cost:{metal:2000,crystal:2500,deut:1000},factor:2.0,timeBase:300,effect:1,effectKey:"scanRange",labRequired:4},
+  {id:"tech_cartography",name:"Cartographie Avancée",icon:"🗺️",desc:"Optimise les trajectoires. −3% de carburant par niveau.",branch:"exp",maxLevel:8,cost:{metal:800,crystal:1200,deut:1500},factor:1.7,timeBase:240,effect:0.03,effectKey:"fuelCost",labRequired:6},
+];
+const SHIPS=[
+  {id:"chasseur",name:"Chasseur",icon:"🛸",cost:{metal:3000,crystal:1000,deut:0},attack:50,shield:10,cargo:50,req:{hangar:1}},
+  {id:"cargo",name:"Cargo",icon:"🚢",cost:{metal:2000,crystal:2000,deut:0},attack:5,shield:25,cargo:5000,req:{hangar:2}},
+  {id:"croiseur",name:"Croiseur",icon:"⚔️",cost:{metal:20000,crystal:7000,deut:2000},attack:400,shield:100,cargo:800,req:{hangar:3}},
+  {id:"colonisateur",name:"Colonisateur",icon:"🌱",cost:{metal:25000,crystal:15000,deut:8000},attack:0,shield:50,cargo:10000,req:{hangar:4,qg:5},techReq:"tech_colonization",isColonyShip:true,desc:"Un vaisseau massif capable de fonder une colonie sur une planète sauvage. Consommé à l'arrivée."},
+];
+
+// ──────────────────────────────────────────────────────
+// ANOMALIES — V1 step 1: data only (no helpers, no integration)
+// ──────────────────────────────────────────────────────
+var ANOMALY_TYPES={
+  asteroids:{id:"asteroids",icon:"\u{1FAA8}",name:"Champ d\u2019ast\u00E9ro\u00EFdes",color:[200,180,160],glowColor:[255,230,180],rarityWeight:50,lifetimeMin:2,lifetimeMax:4,description:"Un dense champ de roches m\u00E9talliques en suspension. Composition variable mais riche en minerais."},
+  gascloud:{id:"gascloud",icon:"\u{1F32B}\uFE0F",name:"Nuage de gaz",color:[100,255,180],glowColor:[150,255,200],rarityWeight:25,lifetimeMin:2,lifetimeMax:4,description:"Un nuage de gaz volatils. Forte concentration de deut\u00E9rium d\u00E9tect\u00E9e par les analyseurs."},
+  wreck:{id:"wreck",icon:"\u{1F6F0}\uFE0F",name:"\u00C9pave ancienne",color:[140,140,180],glowColor:[200,180,255],rarityWeight:15,lifetimeMin:3,lifetimeMax:4,description:"Vestige d\u2019un vaisseau d\u2019une civilisation disparue. Pourrait contenir des artefacts de valeur."},
+  storm:{id:"storm",icon:"\u26A1",name:"Temp\u00EAte \u00E9nerg\u00E9tique",color:[120,180,255],glowColor:[180,220,255],rarityWeight:10,lifetimeMin:2,lifetimeMax:3,description:"Temp\u00EAte de plasma haute \u00E9nergie. Ph\u00E9nom\u00E8ne instable mais riche en \u00E9nergie pure."}
+};
+var ANOMALY_SETTINGS={maxActive:3,minSpawnIntervalMs:1800000,maxSpawnIntervalMs:3600000,initialSpawnDelayMs:300000};
+
+// Choices available per anomaly type. Each option: id, label, desc, reward, baseCargos (multiplied by intensity)
+// reward types: "resources" {metal,crystal,deut}, "boost" {boostType, percent, durationMs}, "tech_or_boost" (random)
+var ANOMALY_CHOICES={
+  asteroids:[
+    {id:"surface",label:"Minage de surface",desc:"Rapide mais peu rentable. R\u00E9colte le m\u00E9tal en surface.",rewardKind:"resources",rewardBase:{metal:800,crystal:0,deut:0},timeMul:0.6,cargoMul:0.7},
+    {id:"deep",label:"Forage profond",desc:"Long et complexe. M\u00E9tal et cristal en quantit\u00E9.",rewardKind:"resources",rewardBase:{metal:1500,crystal:600,deut:0},timeMul:1.4,cargoMul:1.2},
+    {id:"selective",label:"R\u00E9colte s\u00E9lective",desc:"\u00C9quilibr\u00E9. Gros bundle de m\u00E9tal de qualit\u00E9.",rewardKind:"resources",rewardBase:{metal:2200,crystal:200,deut:0},timeMul:1.0,cargoMul:1.0}
+  ],
+  gascloud:[
+    {id:"aspiration",label:"Aspiration rapide",desc:"Capture rapide du deut\u00E9rium volatile.",rewardKind:"resources",rewardBase:{metal:0,crystal:0,deut:600},timeMul:0.6,cargoMul:0.7},
+    {id:"filtrage",label:"Filtrage approfondi",desc:"Plus lent, mais extrait deut\u00E9rium et cristal.",rewardKind:"resources",rewardBase:{metal:0,crystal:500,deut:900},timeMul:1.4,cargoMul:1.2},
+    {id:"catalyse",label:"Catalysation",desc:"Convertit le gaz en boost de production d\u2019\u00E9nergie.",rewardKind:"boost",rewardBase:{boostType:"energy",percent:25,durationMs:7200000},timeMul:1.0,cargoMul:1.0}
+  ],
+  wreck:[
+    {id:"pillage",label:"Pillage rapide",desc:"R\u00E9cup\u00E8re ce qui est facile \u00E0 embarquer.",rewardKind:"resources",rewardBase:{metal:600,crystal:600,deut:300},timeMul:0.7,cargoMul:0.8},
+    {id:"demantelement",label:"D\u00E9mant\u00E8lement complet",desc:"Long mais ram\u00E8ne une fortune en m\u00E9tal et cristal.",rewardKind:"resources",rewardBase:{metal:2000,crystal:1500,deut:0},timeMul:1.5,cargoMul:1.3},
+    {id:"etude",label:"\u00C9tude de la technologie",desc:"50% : niveau de tech gratuit (n\u00E9cessite Laboratoire). 50% : boost +30% prod globale 2h.",rewardKind:"tech_or_boost",rewardBase:{techBonus:1,boostPercent:30,boostDurationMs:7200000},timeMul:1.2,cargoMul:1.0}
+  ],
+  storm:[
+    {id:"capture",label:"Capture rapide",desc:"Boost \u00E9nergie 1h, vite r\u00E9colt\u00E9.",rewardKind:"boost",rewardBase:{boostType:"energy",percent:30,durationMs:3600000},timeMul:0.6,cargoMul:0.6},
+    {id:"stabilisation",label:"Stabilisation",desc:"Long mais boost \u00E9nergie 3h.",rewardKind:"boost",rewardBase:{boostType:"energy",percent:30,durationMs:10800000},timeMul:1.5,cargoMul:0.9},
+    {id:"conversion",label:"Conversion en deut\u00E9rium",desc:"Convertit le plasma en deut\u00E9rium massif.",rewardKind:"resources",rewardBase:{metal:0,crystal:0,deut:1200},timeMul:1.1,cargoMul:1.1}
+  ]
+};
+
+// Helper: how many cargos required to analyze an anomaly (based on intensity + choice multiplier)
+// intensity is 0.5 to 1.0 from createAnomaly
+function computeAnomalyCargos(anom,choice){
+  var base=2;
+  if(anom.intensity>0.7)base=4;
+  if(anom.intensity>0.9)base=6;
+  return Math.max(1,Math.round(base*(choice.cargoMul||1)));
+}
+
+// Helper: travel time in ms for a fleet to reach an anomaly and come back
+// distance is in galaxy units (XYZ). Average cruiser speed ~ 1 unit / 30 seconds.
+// Round-trip = 2 * one-way.
+function computeAnomalyTravelMs(anom,playerPlanet,choice){
+  if(!playerPlanet||!anom||!anom.pos)return 600000; // 10 min fallback
+  // Player planet uses orbit data; convert to xyz
+  var a=playerPlanet.orbitAngle3d||0;
+  var lx=Math.cos(a)*playerPlanet.orbitRadius3d;
+  var lz=Math.sin(a)*playerPlanet.orbitRadius3d;
+  var yi=lz*Math.sin(playerPlanet.orbitInc||0);
+  var zi=lz*Math.cos(playerPlanet.orbitInc||0);
+  var px=lx*Math.cos(playerPlanet.orbitAsc||0)-zi*Math.sin(playerPlanet.orbitAsc||0);
+  var pz=lx*Math.sin(playerPlanet.orbitAsc||0)+zi*Math.cos(playerPlanet.orbitAsc||0);
+  var py=yi;
+  var dx=anom.pos.x-px, dy=anom.pos.y-py, dz=anom.pos.z-pz;
+  var dist=Math.sqrt(dx*dx+dy*dy+dz*dz);
+  // Round-trip duration: 30 seconds per unit, * 2, * choice timeMul
+  var ms=dist*30*1000*2*(choice.timeMul||1);
+  // Clamp: min 5min, max 90min
+  return Math.max(300000,Math.min(5400000,ms));
+}
+
+// Helper: estimated deuterium fuel cost (lost on failure!)
+function computeAnomalyFuelCost(travelMs){
+  // 5 deut per minute of travel, rounded
+  return Math.max(10,Math.round(travelMs/60000*5));
+}
+
+
+
+function pickAnomalyType(rng){
+  var keys=Object.keys(ANOMALY_TYPES);
+  var totalWeight=0;
+  for(var i=0;i<keys.length;i++)totalWeight+=ANOMALY_TYPES[keys[i]].rarityWeight;
+  var r=rng()*totalWeight;
+  for(var j=0;j<keys.length;j++){
+    r-=ANOMALY_TYPES[keys[j]].rarityWeight;
+    if(r<=0)return ANOMALY_TYPES[keys[j]];
+  }
+  return ANOMALY_TYPES.asteroids;
+}
+
+function generateAnomalyPosition(rng){
+  var r=12+rng()*28;
+  var theta=rng()*Math.PI*2;
+  var phi=(rng()-0.5)*0.8;
+  var x=r*Math.cos(theta)*Math.cos(phi);
+  var y=r*Math.sin(phi);
+  var z=r*Math.sin(theta)*Math.cos(phi);
+  return{x:x,y:y,z:z};
+}
+
+function createAnomaly(rng,now){
+  var type=pickAnomalyType(rng);
+  var pos=generateAnomalyPosition(rng);
+  var lifetimeHours=type.lifetimeMin+rng()*(type.lifetimeMax-type.lifetimeMin);
+  var expiresAt=now+lifetimeHours*3600000;
+  var id="anom_"+now+"_"+Math.floor(rng()*100000);
+  return{id:id,type:type.id,pos:pos,spawnedAt:now,expiresAt:expiresAt,intensity:0.5+rng()*0.5};
+}
+
+function updateAnomalies(s,now){
+  if(!s.anomalies)s.anomalies=[];
+  if(s.nextAnomalyAt===undefined||s.nextAnomalyAt===null){
+    s.nextAnomalyAt=now+ANOMALY_SETTINGS.initialSpawnDelayMs;
+  }
+  s.anomalies=s.anomalies.filter(function(a){return a.expiresAt>now;});
+  if(now>=s.nextAnomalyAt&&s.anomalies.length<ANOMALY_SETTINGS.maxActive){
+    var r=Math.random;
+    var newAnom=createAnomaly(r,now);
+    s.anomalies.push(newAnom);
+    var interval=ANOMALY_SETTINGS.minSpawnIntervalMs+r()*(ANOMALY_SETTINGS.maxSpawnIntervalMs-ANOMALY_SETTINGS.minSpawnIntervalMs);
+    s.nextAnomalyAt=now+interval;
+  }
+}
+
+
+// [ANOMALY SECTION TEMPORARILY REMOVED FOR DIAGNOSIS]
+
+
+
+// ──────────────────────────────────────────────────────
+// MISSIONS / QUÊTES — progression guidée du joueur
+// ──────────────────────────────────────────────────────
+// Each mission has:
+//  - id: unique identifier
+//  - title: short title shown in UI
+//  - desc: description of what to do
+//  - icon: emoji for visual
+//  - check(state): returns true when mission is complete
+//  - reward: {metal, crystal, deut} given when claimed
+//  - unlocks (optional): id of the next mission to reveal (null = always visible)
+const MISSIONS=[
+  {id:"m1_welcome",title:"Bienvenue dans Galaxia",desc:"Ouvre ton continent Alpha en cliquant sur la planète 3D pour explorer tes zones constructibles.",icon:"🌍",reward:{metal:300,crystal:150,deut:50},check:s=>!!(s&&s.missionFlags&&s.missionFlags.openedContinent)},
+  {id:"m2_first_mine",title:"Premier pas vers l'autonomie",desc:"Construis ta première Mine de Métal pour produire du métal en continu.",icon:"⛏️",reward:{metal:500,crystal:200,deut:0},check:s=>(s&&s.buildings&&s.buildings.mine_metal>=1)},
+  {id:"m3_power",title:"L'énergie vitale",desc:"Construis une Centrale Solaire pour alimenter tes mines en énergie.",icon:"☀️",reward:{metal:400,crystal:300,deut:0},check:s=>(s&&s.buildings&&s.buildings.centrale>=1)},
+  {id:"m4_crystal",title:"Richesse cristalline",desc:"Construis une Mine de Cristal pour diversifier ta production.",icon:"💎",reward:{metal:600,crystal:300,deut:100},check:s=>(s&&s.buildings&&s.buildings.mine_crystal>=1)},
+  {id:"m5_fuel",title:"Le carburant du futur",desc:"Construis un Synthétiseur pour produire du deutérium, carburant des flottes.",icon:"⚗️",reward:{metal:800,crystal:400,deut:200},check:s=>(s&&s.buildings&&s.buildings.synth_deut>=1)},
+  {id:"m6_speed",title:"Accélération des travaux",desc:"Construis une Usine de Robots pour accélérer toutes tes constructions.",icon:"🤖",reward:{metal:1000,crystal:500,deut:200},check:s=>(s&&s.buildings&&s.buildings.usine_robots>=1)},
+  {id:"m7_fleet",title:"Vers les étoiles",desc:"Construis un Hangar pour commencer à produire des vaisseaux.",icon:"🚀",reward:{metal:1500,crystal:800,deut:400},check:s=>(s&&s.buildings&&s.buildings.hangar>=1)},
+  {id:"m8_upgrade",title:"Montée en puissance",desc:"Améliore n'importe quelle mine jusqu'au niveau 3.",icon:"📈",reward:{metal:2000,crystal:1000,deut:500},check:s=>(s&&s.buildings&&((s.buildings.mine_metal||0)>=3||(s.buildings.mine_crystal||0)>=3||(s.buildings.synth_deut||0)>=3))},
+  {id:"m9_qg",title:"Le cerveau de l'empire",desc:"Améliore ton Quartier Général jusqu'au niveau 3.",icon:"🏛️",reward:{metal:3000,crystal:1500,deut:800},check:s=>(s&&s.buildings&&(s.buildings.qg||0)>=3)},
+  {id:"m10_explorer",title:"Explorateur de la galaxie",desc:"Visite une autre planète dans la galaxie 3D (clique sur une planète différente).",icon:"🔭",reward:{metal:2500,crystal:1500,deut:600},check:s=>!!(s&&s.missionFlags&&s.missionFlags.visitedOtherPlanet)},
+
+  // ─── MISSION DE CHOIX : SPÉCIALISATION ─────────────────
+  {id:"m11_lab",title:"Centre de recherche",desc:"Construis un Laboratoire pour préparer ton avenir technologique.",icon:"🔬",reward:{metal:2000,crystal:2500,deut:800,title:"Chercheur"},check:s=>(s&&s.buildings&&(s.buildings.laboratoire||0)>=1)},
+  {id:"m12_branch_choice",title:"Choisis ta voie",desc:"L'heure est venue de définir ta stratégie impériale. Choisis ta spécialisation.",icon:"⚜️",reward:{metal:3000,crystal:2000,deut:1000,title:"Stratège"},branchChoice:true,check:s=>!!(s&&s.missionFlags&&s.missionFlags.chosenBranch),requires:["m1_welcome","m2_first_mine","m3_power","m4_crystal","m5_fuel","m6_speed","m7_fleet","m8_upgrade","m9_qg","m10_explorer","m11_lab"]},
+
+  // ─── BRANCHE ÉCONOMIQUE 💰 ─────────────────────────────
+  {id:"eco1_megamine",title:"Industriel en herbe",desc:"Améliore ta Mine de Métal jusqu'au niveau 5.",icon:"⛏️",reward:{metal:4000,crystal:2000,deut:500,title:"Mineur"},branch:"eco",check:s=>(s&&s.buildings&&(s.buildings.mine_metal||0)>=5),requires:["m12_branch_choice"]},
+  {id:"eco2_crystal_master",title:"Maître cristallier",desc:"Améliore ta Mine de Cristal jusqu'au niveau 5.",icon:"💎",reward:{metal:2500,crystal:4000,deut:800},branch:"eco",check:s=>(s&&s.buildings&&(s.buildings.mine_crystal||0)>=5),requires:["m12_branch_choice"]},
+  {id:"eco3_energy_tycoon",title:"Baron de l'énergie",desc:"Améliore ta Centrale Solaire jusqu'au niveau 6 pour tout alimenter.",icon:"☀️",reward:{metal:5000,crystal:3000,deut:1500},branch:"eco",check:s=>(s&&s.buildings&&(s.buildings.centrale||0)>=6),requires:["m12_branch_choice"]},
+  {id:"eco4_treasury",title:"Trésor de guerre",desc:"Accumule 50 000 unités de métal dans tes réserves.",icon:"🏦",reward:{metal:0,crystal:8000,deut:3000,title:"Magnat"},branch:"eco",check:s=>(s&&s.resources&&(s.resources.metal||0)>=50000),requires:["m12_branch_choice"]},
+  {id:"eco5_empire",title:"Empire économique",desc:"Atteins le niveau 8 sur ton Quartier Général, pilier de ton empire.",icon:"🏛️",reward:{metal:15000,crystal:10000,deut:5000,title:"Empereur Économique",unlocks:"tech_economique"},branch:"eco",check:s=>(s&&s.buildings&&(s.buildings.qg||0)>=8),requires:["m12_branch_choice"]},
+
+  // ─── BRANCHE MILITAIRE ⚔️ ─────────────────────────────
+  {id:"mil1_first_fleet",title:"Première flotte",desc:"Construis 5 Chasseurs dans ton Hangar.",icon:"✈️",reward:{metal:3500,crystal:2000,deut:1000,title:"Pilote"},branch:"mil",check:s=>(s&&s.ships&&(s.ships.chasseur||0)>=5),requires:["m12_branch_choice"]},
+  {id:"mil2_cargo_fleet",title:"Logistique militaire",desc:"Construis 3 Cargos pour ravitailler tes forces.",icon:"🚢",reward:{metal:3000,crystal:2500,deut:1500},branch:"mil",check:s=>(s&&s.ships&&(s.ships.cargo||0)>=3),requires:["m12_branch_choice"]},
+  {id:"mil3_cruiser",title:"Force de frappe",desc:"Construis ton premier Croiseur, vaisseau lourd de combat.",icon:"🛸",reward:{metal:5000,crystal:4000,deut:2000,title:"Commandant"},branch:"mil",check:s=>(s&&s.ships&&(s.ships.croiseur||0)>=1),requires:["m12_branch_choice"]},
+  {id:"mil4_hangar_maxed",title:"Complexe militaire",desc:"Améliore ton Hangar jusqu'au niveau 5 pour une production accélérée.",icon:"🏭",reward:{metal:6000,crystal:4000,deut:3000},branch:"mil",check:s=>(s&&s.buildings&&(s.buildings.hangar||0)>=5),requires:["m12_branch_choice"]},
+  {id:"mil5_armada",title:"L'Armada",desc:"Possède une flotte totale de 20 vaisseaux (tous types confondus).",icon:"⚔️",reward:{metal:12000,crystal:8000,deut:6000,title:"Amiral",unlocks:"tech_militaire"},branch:"mil",check:s=>{if(!s||!s.ships)return false;const total=(s.ships.chasseur||0)+(s.ships.cargo||0)+(s.ships.croiseur||0);return total>=20;},requires:["m12_branch_choice"]},
+
+  // ─── BRANCHE EXPLORATION 🔭 ────────────────────────────
+  {id:"exp1_multi_visit",title:"Curieux de l'univers",desc:"Visite 3 planètes différentes dans la galaxie.",icon:"🌠",reward:{metal:3000,crystal:2500,deut:1500,title:"Observateur"},branch:"exp",check:s=>!!(s&&s.missionFlags&&(s.missionFlags.visitedPlanetCount||0)>=3),requires:["m12_branch_choice"]},
+  {id:"exp2_continent_master",title:"Cartographe",desc:"Ouvre tous les continents (Alpha, Beta, Gamma) de ta planète.",icon:"🗺️",reward:{metal:2500,crystal:3500,deut:1500},branch:"exp",check:s=>!!(s&&s.missionFlags&&s.missionFlags.openedAllContinents),requires:["m12_branch_choice"]},
+  {id:"exp3_fleet_dispatched",title:"Voyageur intergalactique",desc:"Envoie une flotte vers une autre planète.",icon:"🚀",reward:{metal:4000,crystal:3000,deut:2500,title:"Pionnier"},branch:"exp",check:s=>!!(s&&s.missionFlags&&s.missionFlags.dispatchedFleet),requires:["m12_branch_choice"]},
+  {id:"exp4_deut_stockpile",title:"Carburant pour l'infini",desc:"Accumule 20 000 unités de Deutérium, carburant des longs voyages.",icon:"⚗️",reward:{metal:5000,crystal:3500,deut:0},branch:"exp",check:s=>(s&&s.resources&&(s.resources.deut||0)>=20000),requires:["m12_branch_choice"]},
+  {id:"exp5_galactic_presence",title:"Présence galactique",desc:"Visite 5 planètes différentes pour établir ta présence dans la galaxie.",icon:"🌌",reward:{metal:10000,crystal:10000,deut:8000,title:"Explorateur Galactique",unlocks:"tech_exploration"},branch:"exp",check:s=>!!(s&&s.missionFlags&&(s.missionFlags.visitedPlanetCount||0)>=5),requires:["m12_branch_choice"]},
+
+  // ─── MISSIONS D'EXPANSION 🌱 ─────────────────────────
+  // Available to all branches once they've chosen their path. Guides the player toward colonization.
+  {id:"col1_tech",title:"Maîtrise de la colonisation",desc:"Recherche la Technologie de Colonisation dans ton Laboratoire (requiert labo Niv 3).",icon:"🔬",reward:{metal:5000,crystal:5000,deut:2500,title:"Pionnier Galactique"},check:s=>getTechLevel(s||{},"tech_colonization")>=1,requires:["m12_branch_choice"]},
+  {id:"col2_first_ship",title:"Premier Colonisateur",desc:"Construis ton premier Vaisseau Colonisateur dans le Hangar.",icon:"🌱",reward:{metal:8000,crystal:6000,deut:4000},check:s=>(s&&s.ships&&(s.ships.colonisateur||0)>=1),requires:["col1_tech"]},
+  {id:"col3_first_colony",title:"Une nouvelle frontière",desc:"Fonde ta première colonie sur une planète sauvage.",icon:"🌍",reward:{metal:12000,crystal:10000,deut:6000,title:"Fondateur"},check:s=>!!(s&&s.empire&&s.empire.length>=1),requires:["col2_first_ship"]},
+  {id:"col4_empire",title:"Empire multi-planétaire",desc:"Possède 3 planètes au total (natale + 2 colonies). Monte ton QG pour débloquer plus d'emplacements.",icon:"🏛️",reward:{metal:20000,crystal:15000,deut:10000,title:"Empereur"},check:s=>!!(s&&s.empire&&s.empire.length>=2),requires:["col3_first_colony"]},
+];
+// ──────────────────────────────────────────────────────
+// BRANCH BONUSES — permanent specialization effects
+// Applied once the player chooses a branch via mission m11.
+// All values are multipliers/factors applied in game logic.
+// ──────────────────────────────────────────────────────
+const BRANCH_BONUSES={
+  eco:{
+    name:"Économique",
+    icon:"💰",
+    color:"#d4a850",
+    prodMult:1.10,       // +10% production of all resources
+    buildCostMult:0.85,  // -15% building construction cost
+    storageMult:2.0,     // x2 max resource storage
+    desc:"Prod +10% · Coût bâtiments -15% · Stockage x2",
+  },
+  mil:{
+    name:"Militaire",
+    icon:"⚔️",
+    color:"#d46060",
+    shipAttackMult:1.10, // +10% ship attack/defense
+    shipTimeMult:0.85,   // -15% ship construction time
+    shipCostMult:0.95,   // -5% ship resource cost
+    desc:"Att/Def +10% · Temps vaisseau -15% · Coût vaisseau -5%",
+  },
+  exp:{
+    name:"Exploration",
+    icon:"🔭",
+    color:"#60a0d4",
+    fleetSpeedMult:1.25, // +25% fleet travel speed
+    fuelMult:0.70,       // -30% deuterium consumption
+    scanRange:2,         // extended scan range (unit depends on future feat)
+    desc:"Vitesse flotte +25% · Deut -30% · Scan étendu",
+  },
+};
+// ──────────────────────────────────────────────────────
+// PROFILE — player identity, customization
+// ──────────────────────────────────────────────────────
+// Classy color palette (8 colors) - players pick one to identify themselves
+const PROFILE_COLORS=[
+  {id:"azure",c:"#4a9adf",name:"Azure"},
+  {id:"gold",c:"#d4a850",name:"Or"},
+  {id:"crimson",c:"#d46060",name:"Cramoisi"},
+  {id:"emerald",c:"#50c878",name:"Émeraude"},
+  {id:"violet",c:"#9370db",name:"Violet"},
+  {id:"teal",c:"#4abfbf",name:"Sarcelle"},
+  {id:"rose",c:"#e8749e",name:"Rose"},
+  {id:"silver",c:"#a0a8b8",name:"Argent"},
+  {id:"imperial",c:"#ffd700",name:"Or Impérial",unlockable:true},
+  {id:"neoncyan",c:"#00f0ff",name:"Néon Cyan",unlockable:true},
+];
+// Banner gradient presets
+const PROFILE_BANNERS=[
+  {id:"nebula",g:"linear-gradient(135deg,#1a1040,#4a2080,#8a3090)",name:"Nébuleuse"},
+  {id:"deep",g:"linear-gradient(135deg,#040a20,#0a2050,#1a4080)",name:"Abysses"},
+  {id:"sunset",g:"linear-gradient(135deg,#4a1020,#9a3020,#c06030)",name:"Crépuscule"},
+  {id:"forest",g:"linear-gradient(135deg,#0a2010,#1a5030,#4a9050)",name:"Canopée"},
+  {id:"arctic",g:"linear-gradient(135deg,#1a3040,#4a7090,#a0c0e0)",name:"Arctique"},
+  {id:"void",g:"linear-gradient(135deg,#000000,#1a0020,#2a1040)",name:"Vide"},
+  {id:"galactic",g:"linear-gradient(135deg,#1a0a40,#4a0080,#c020a0,#ff6040)",name:"Galactique",unlockable:true},
+  {id:"blackhole",g:"radial-gradient(ellipse at center,#000000 20%,#2a0040 50%,#4a0080 80%,#8a30c0 100%)",name:"Trou Noir",unlockable:true},
+];
+// Avatar content options (what's shown inside the circle)
+const AVATAR_CONTENTS=[
+  {id:"initials",name:"Initiales",dynamic:true},
+  {id:"branch",name:"Icône Spécialité",dynamic:true},
+  // Base emojis (always available)
+  {id:"emoji_rocket",name:"Fusée",display:"🚀"},
+  {id:"emoji_star",name:"Étoile",display:"⭐"},
+  {id:"emoji_galaxy",name:"Galaxie",display:"🌌"},
+  {id:"emoji_crown",name:"Couronne",display:"👑"},
+  {id:"emoji_sword",name:"Épée",display:"⚔️"},
+  {id:"emoji_ufo",name:"OVNI",display:"🛸"},
+  {id:"emoji_comet",name:"Comète",display:"☄️"},
+  {id:"emoji_planet",name:"Planète",display:"🪐"},
+  // Unlockable emojis
+  {id:"emoji_shield",name:"Bouclier",display:"🛡️",unlockable:true},
+  {id:"emoji_gem",name:"Diamant",display:"💎",unlockable:true},
+  {id:"emoji_bolt",name:"Éclair",display:"⚡",unlockable:true},
+  // Base symbols
+  {id:"symbol_diamond",name:"Losange",display:"◆",symbolic:true},
+  {id:"symbol_hex",name:"Hexagone",display:"◈",symbolic:true},
+  {id:"symbol_sun",name:"Soleil",display:"☉",symbolic:true},
+  {id:"symbol_gear",name:"Engrenage",display:"⌬",symbolic:true},
+  {id:"symbol_honeycomb",name:"Alvéole",display:"⬢",symbolic:true},
+  {id:"symbol_sparkle",name:"Étincelle",display:"✦",symbolic:true},
+  {id:"symbol_triangle",name:"Prisme",display:"⟁",symbolic:true},
+  {id:"symbol_reticle",name:"Cible",display:"⌖",symbolic:true},
+  // Unlockable symbols
+  {id:"symbol_inf",name:"Infini",display:"∞",symbolic:true,unlockable:true},
+  {id:"symbol_atom",name:"Atome",display:"⚛",symbolic:true,unlockable:true},
+  {id:"symbol_crown",name:"Couronne Royale",display:"♛",symbolic:true,unlockable:true},
+];
+// Avatar background styles
+const AVATAR_BACKGROUNDS=[
+  {id:"gradient",name:"Dégradé",style:c=>"linear-gradient(135deg,"+c+"44,"+c+"11)"},
+  {id:"solid",name:"Uni",style:c=>c+"33"},
+  {id:"starfield",name:"Champ d'étoiles",style:c=>"radial-gradient(circle at 30% 30%,#fff3,transparent 2px),radial-gradient(circle at 70% 60%,#fff2,transparent 2px),radial-gradient(circle at 50% 80%,#fff2,transparent 2px),linear-gradient(135deg,"+c+"44,"+c+"11)"},
+  {id:"holographic",name:"Holographique",style:c=>"conic-gradient(from 0deg,"+c+"66,#fff5,"+c+"33,#fff5,"+c+"66)"},
+  {id:"circuit",name:"Circuit",style:c=>"linear-gradient(135deg,"+c+"44,"+c+"11),repeating-linear-gradient(45deg,transparent,transparent 4px,"+c+"22 4px,"+c+"22 5px)"},
+  {id:"neon",name:"Néon",style:c=>"radial-gradient(circle,"+c+"77,"+c+"11 70%),"+c+"11",unlockable:true},
+  {id:"matrix",name:"Matrix",style:c=>"repeating-linear-gradient(0deg,#00ff4022,#00ff4022 2px,transparent 2px,transparent 4px),linear-gradient(135deg,#001a0044,#00000011)",unlockable:true},
+];
+// Avatar border styles
+const AVATAR_BORDERS=[
+  {id:"thick",name:"Épaisse",cssBorder:c=>"3px solid "+c},
+  {id:"thin",name:"Fine",cssBorder:c=>"1px solid "+c},
+  {id:"double",name:"Double",cssBorder:c=>"4px double "+c},
+  {id:"dashed",name:"Tiretée",cssBorder:c=>"2px dashed "+c},
+  {id:"animated",name:"Animée",cssBorder:c=>"2px solid "+c,anim:"avatarBorderGlow 2.4s ease-in-out infinite"},
+  {id:"neon",name:"Néon",cssBorder:c=>"2px solid "+c,extraShadow:c=>"0 0 8px "+c+",0 0 16px "+c+"88,inset 0 0 8px "+c+"55",unlockable:true},
+  {id:"glow",name:"Halo Brillant",cssBorder:c=>"3px solid "+c,extraShadow:c=>"0 0 14px "+c+"cc,0 0 28px "+c+"66",unlockable:true},
+];
+// Avatar effects (visual animations / overlays)
+const AVATAR_EFFECTS=[
+  {id:"none",name:"Aucun"},
+  {id:"halo",name:"Halo",shadow:c=>"0 0 14px "+c+"cc"},
+  {id:"pulse",name:"Pulsation",anim:"avatarPulse 2s ease-in-out infinite"},
+  {id:"scanlines",name:"Scanlines",anim:"avatarScan 3s linear infinite"},
+  {id:"particles",name:"Particules",shadow:c=>"0 0 20px "+c+"88,0 -8px 12px "+c+"44,0 8px 12px "+c+"44"},
+  {id:"aura",name:"Aura Divine",anim:"avatarAuraRing 3s ease-in-out infinite",shadow:c=>"0 0 24px "+c+"aa",unlockable:true},
+  {id:"trail",name:"Traînée",anim:"avatarSpin 4s linear infinite",shadow:c=>"0 0 18px "+c+"aa,4px 0 8px "+c+"55,-4px 0 8px "+c+"55",unlockable:true},
+];
+// Mapping of mission IDs to cosmetic unlocks (cosmetic ID = category prefix + item)
+const COSMETIC_UNLOCKS={
+  // Classic missions
+  m2_first_mine:{category:"border",itemId:"neon"},
+  m3_power:{category:"content",itemId:"emoji_bolt"},
+  m4_crystal:{category:"content",itemId:"emoji_gem"},
+  m6_speed:{category:"content",itemId:"symbol_inf"},
+  m7_fleet:{category:"content",itemId:"emoji_shield"},
+  m9_qg:{category:"content",itemId:"symbol_crown"},
+  m10_explorer:{category:"background",itemId:"neon"},
+  // Eco branch
+  eco2_crystal_master:{category:"color",itemId:"imperial"},
+  eco3_energy_tycoon:{category:"effect",itemId:"aura"},
+  eco5_empire:{category:"banner",itemId:"galactic"},
+  // Mil branch
+  mil2_cargo_fleet:{category:"border",itemId:"glow"},
+  mil3_cruiser:{category:"content",itemId:"symbol_atom"},
+  mil5_armada:{category:"color",itemId:"neoncyan"},
+  // Exp branch
+  exp1_multi_visit:{category:"background",itemId:"matrix"},
+  exp3_fleet_dispatched:{category:"effect",itemId:"trail"},
+  exp5_galactic_presence:{category:"banner",itemId:"blackhole"},
+};
+// Default profile built from username (deterministic so avatars are stable pre-customization)
+const getDefaultProfile=(name)=>{
+  const h=(name||"").split("").reduce((a,c)=>a+c.charCodeAt(0),0);
+  return{
+    colorId:PROFILE_COLORS[h%8].id, // only base colors (first 8) for defaults
+    bannerId:PROFILE_BANNERS[(h+3)%6].id, // only base banners (first 6)
+    activeTitle:"Commandant",
+    quote:"",
+    avatarContent:"initials",
+    avatarBg:"gradient",
+    avatarBorder:"thick",
+    avatarEffect:"none",
+  };
+};
+// Retrieve current profile with defaults merged in
+const getProfile=(state,userName)=>{
+  const def=getDefaultProfile(userName);
+  return{...def,...((state&&state.profile)||{})};
+};
+// Initials from a name (1-2 uppercase chars)
+const getInitials=(name)=>{
+  if(!name)return"?";
+  const parts=name.trim().split(/\s+/);
+  if(parts.length>=2)return(parts[0][0]+parts[1][0]).toUpperCase();
+  return name.slice(0,2).toUpperCase();
+};
+// Get the color hex from a colorId
+const getColorHex=(colorId)=>{
+  const c=PROFILE_COLORS.find(x=>x.id===colorId);
+  return c?c.c:PROFILE_COLORS[0].c;
+};
+// Get the banner gradient from a bannerId
+const getBannerGradient=(bannerId)=>{
+  const b=PROFILE_BANNERS.find(x=>x.id===bannerId);
+  return b?b.g:PROFILE_BANNERS[0].g;
+};
+// ── COSMETIC UNLOCK HELPERS ──
+// Derive list of unlocked cosmetic IDs from completed missions.
+// A cosmetic ID is "category:itemId" (e.g. "color:imperial", "border:neon").
+const deriveUnlockedCosmetics=(state)=>{
+  const claimed=(state&&state.missionsClaimed)||[];
+  const set=new Set();
+  claimed.forEach(mid=>{
+    const u=COSMETIC_UNLOCKS[mid];
+    if(u)set.add(u.category+":"+u.itemId);
+  });
+  return Array.from(set);
+};
+// Check if a specific cosmetic item is unlocked
+const isCosmeticUnlocked=(state,category,itemId)=>{
+  // Non-unlockable items are always available
+  const arrays={color:PROFILE_COLORS,banner:PROFILE_BANNERS,content:AVATAR_CONTENTS,background:AVATAR_BACKGROUNDS,border:AVATAR_BORDERS,effect:AVATAR_EFFECTS};
+  const arr=arrays[category];
+  if(arr){
+    const item=arr.find(x=>x.id===itemId);
+    if(item&&!item.unlockable)return true;
+  }
+  // Unlockable: check derived list or state.cosmetics cache
+  const unlocked=(state&&state.cosmetics)||deriveUnlockedCosmetics(state);
+  return unlocked.includes(category+":"+itemId);
+};
+// Find which mission (if any) unlocks a given cosmetic
+const findCosmeticSourceMission=(category,itemId)=>{
+  for(const mid in COSMETIC_UNLOCKS){
+    const u=COSMETIC_UNLOCKS[mid];
+    if(u.category===category&&u.itemId===itemId){
+      return MISSIONS.find(m=>m.id===mid)||null;
+    }
+  }
+  return null;
+};
+// Get human-readable display for a cosmetic (used in mission reward badges)
+const getCosmeticDisplay=(category,itemId)=>{
+  const arrays={color:PROFILE_COLORS,banner:PROFILE_BANNERS,content:AVATAR_CONTENTS,background:AVATAR_BACKGROUNDS,border:AVATAR_BORDERS,effect:AVATAR_EFFECTS};
+  const labels={color:"Couleur",banner:"Bannière",content:"Avatar",background:"Fond",border:"Bordure",effect:"Effet"};
+  const arr=arrays[category];
+  if(!arr)return null;
+  const item=arr.find(x=>x.id===itemId);
+  if(!item)return null;
+  return{typeLabel:labels[category],name:item.name,display:item.display||null};
+};
+// Get what to render inside the avatar (text/emoji/symbol)
+const getAvatarContent=(profile,name,state)=>{
+  const c=AVATAR_CONTENTS.find(x=>x.id===profile.avatarContent)||AVATAR_CONTENTS[0];
+  if(c.id==="initials")return getInitials(name);
+  if(c.id==="branch"){
+    const bb=getBranchBonus(state);
+    return bb?bb.icon:getInitials(name);
+  }
+  return c.display||getInitials(name);
+};
+const isAvatarSymbolic=(profile)=>{
+  const c=AVATAR_CONTENTS.find(x=>x.id===profile.avatarContent);
+  return!!(c&&c.symbolic);
+};
+const getAvatarBackground=(profile,color)=>{
+  const b=AVATAR_BACKGROUNDS.find(x=>x.id===profile.avatarBg)||AVATAR_BACKGROUNDS[0];
+  return b.style(color);
+};
+const getAvatarBorderStyle=(profile,color)=>{
+  const b=AVATAR_BORDERS.find(x=>x.id===profile.avatarBorder)||AVATAR_BORDERS[0];
+  return{border:b.cssBorder(color),extraShadow:b.extraShadow?b.extraShadow(color):"",anim:b.anim||""};
+};
+const getAvatarEffectShadow=(profile,color)=>{
+  const e=AVATAR_EFFECTS.find(x=>x.id===profile.avatarEffect);
+  return(e&&e.shadow)?e.shadow(color):"";
+};
+const getAvatarEffectAnimation=(profile)=>{
+  const e=AVATAR_EFFECTS.find(x=>x.id===profile.avatarEffect);
+  return(e&&e.anim)||"";
+};
+
+// Helper to get the current branch bonus object (or null if no branch yet)
+const getBranchBonus=(state)=>{
+  const key=state&&state.missionFlags&&state.missionFlags.chosenBranch;
+  return key?BRANCH_BONUSES[key]:null;
+};
+
+// ── Technology helpers ──
+const getTechLevel=(state,techId)=>{if(!state||!state.tech)return 0;return state.tech[techId]||0;};
+const getTechBonus=(state,effectKey)=>{
+  if(!state||!state.tech)return 0;
+  let total=0;
+  TECHNOLOGIES.forEach(t=>{if(t.effectKey!==effectKey)return;const lv=state.tech[t.id]||0;total+=lv*t.effect;});
+  return total;
+};
+const techCost=(tech,lv)=>({
+  metal:Math.round(tech.cost.metal*Math.pow(tech.factor,lv)),
+  crystal:Math.round(tech.cost.crystal*Math.pow(tech.factor,lv)),
+  deut:Math.round(tech.cost.deut*Math.pow(tech.factor,lv)),
+});
+const techTime=(tech,lv,labLevel)=>{
+  const base=tech.timeBase*Math.pow(1.5,lv);
+  const reduction=1+(labLevel||0)*0.5;
+  return Math.max(15,Math.round(base/reduction));
+};
+const isTechAvailable=(tech,state)=>{
+  if(tech.branch===null)return true;
+  const branch=state&&state.missionFlags&&state.missionFlags.chosenBranch;
+  return branch===tech.branch;
+};
+const canAffordTech=(state,cost)=>{
+  if(!state||!state.resources)return false;
+  return state.resources.metal>=cost.metal&&state.resources.crystal>=cost.crystal&&state.resources.deut>=(cost.deut||0);
+};
+const techLockReason=(tech,state)=>{
+  if(tech.branch!==null){
+    const branch=state&&state.missionFlags&&state.missionFlags.chosenBranch;
+    if(branch!==tech.branch)return"branch";
+  }
+  if(tech.labRequired){
+    const labLv=(state&&state.buildings&&state.buildings.laboratoire)||0;
+    if(labLv<tech.labRequired)return"lab";
+  }
+  return null;
+};
+
+// Helper: get mission state (not started, in progress, ready to claim, claimed)
+const getMissionStatus=(mission,state)=>{
+  if(!state||!state.missionsClaimed)return"available";
+  if(state.missionsClaimed.includes(mission.id))return"claimed";
+  return mission.check(state)?"ready":"available";
+};
+// Categorize a mission: "branch" for specialty missions, "classic" otherwise.
+// (Daily/weekly category will be added later.)
+const getMissionCategory=(m)=>{
+  if(m.branch)return"branch";
+  if(m.daily||m.weekly)return"daily";
+  return"classic";
+};
+// Helper: get the next missions to display (ready + a couple available)
+// Filters: claimed missions hidden; branch missions only shown after branch choice;
+// Missions with requires[] are included but flagged with _locked=true when prereqs unmet,
+// so the UI can show them as "coming soon" with a reason.
+const getActiveMissions=(state)=>{
+  if(!state)return[];
+  const claimed=new Set((state.missionsClaimed||[]));
+  const chosenBranch=state.missionFlags&&state.missionFlags.chosenBranch;
+  return MISSIONS.filter(m=>{
+    if(claimed.has(m.id))return false;
+    if(m.branch&&m.branch!==chosenBranch)return false;
+    return true;
+  }).map(m=>{
+    if(m.requires&&m.requires.length){
+      const unmet=m.requires.filter(r=>!claimed.has(r));
+      if(unmet.length>0)return{...m,_locked:true,_unmetRequires:unmet};
+    }
+    return m;
+  });
+};
+// Helper: filter active missions by category
+const getMissionsByCategory=(state,cat)=>{
+  const active=getActiveMissions(state);
+  return active.filter(m=>getMissionCategory(m)===cat);
+};
+// Helper: count ready-to-claim missions by category (for badge dots on tabs)
+const getReadyCountByCategory=(state,cat)=>{
+  return getMissionsByCategory(state,cat).filter(m=>!m._locked&&m.check(state)).length;
+};
+
+// Habitability multiplier for construction cost & time — easier to build on hospitable planets
+const habMultiplier=p=>{
+  if(!p)return 1;
+  const h=habOf(p);
+  switch(h.l){
+    case"Paradisiaque":return 0.90; // -10% bonus
+    case"Habitable":return 1.00;    // normal
+    case"Marginale":return 1.10;    // +10%
+    case"Hostile":return 1.20;      // +20%
+    case"Inhospitalier":return 1.30;// +30%
+    default:return 1.00;
+  }
+};
+// Bonus multiplier: harder planets give a stronger passive bonus (risk/reward).
+// Paradisiaque=0.75x, Habitable=1x, Marginale=1.2x, Hostile=1.45x, Inhospitalier=1.75x
+const habBonusMultiplier=p=>{
+  if(!p)return 1;
+  const h=habOf(p);
+  switch(h.l){
+    case"Paradisiaque":return 0.75;
+    case"Habitable":return 1.00;
+    case"Marginale":return 1.20;
+    case"Hostile":return 1.45;
+    case"Inhospitalier":return 1.75;
+    default:return 1.00;
+  }
+};
+// Returns the passive bonus values already adjusted for habitability.
+// Takes the planet object (needs type + attributes for habOf).
+const getPassiveBonus=p=>{
+  if(!p||!p.type)return null;
+  const base=PLANET_PASSIVE_BONUS[p.type];
+  if(!base)return null;
+  const m=habBonusMultiplier(p);
+  const out={label:base.label};
+  Object.keys(base).forEach(k=>{
+    if(k==="label")return;
+    out[k]=base[k]*m;
+  });
+  return out;
+};
+const bCost=(b,lv,planet,state)=>{
+  const m=habMultiplier(planet);
+  const bb=getBranchBonus(state);
+  const branchMult=(bb&&bb.buildCostMult)||1;
+  const techReduction=getTechBonus(state,"buildCost");
+  const qgReduction=state&&state.zones?(getTerrainBonuses(state.zones,planet).qgBuildCost||0):0;
+  const finalMult=branchMult*(1-techReduction)*(1-qgReduction);
+  return{
+    metal:Math.round(b.base.metal*Math.pow(b.factor,lv)*m*finalMult),
+    crystal:Math.round(b.base.crystal*Math.pow(b.factor,lv)*m*finalMult),
+    deut:Math.round(b.base.deut*Math.pow(b.factor,lv)*m*finalMult)
+  };
+};
+const bTime=(b,lv,rl,planet,state,zones)=>{
+  const c=bCost(b,lv,planet,state);
+  let zoneBonus=0;
+  if(zones){const tb=getTerrainBonuses(zones,planet);zoneBonus=tb.buildSpeed||0;}
+  const raw=Math.max(30+lv*20,Math.round((c.metal+c.crystal)/(200*(1+(rl||0)))));
+  return Math.max(10,Math.round(raw*(1-zoneBonus)));
+};
+const prodH=(lv,base,bonus,state,resourceKind,planet)=>{
+  const bb=getBranchBonus(state);
+  const branchMult=(bb&&bb.prodMult)||1;
+  let techBonus=0;
+  if(state&&resourceKind){
+    const key=resourceKind==="metal"?"metalProd":resourceKind==="crystal"?"crystalProd":resourceKind==="deut"?"deutProd":null;
+    if(key)techBonus=getTechBonus(state,key);
+  }
+  // QG zone bonuses: qgProdAll for all resources, qgCrystalProd for crystal only
+  let qgBonus=0;
+  if(state&&state.zones){
+    const tb=getTerrainBonuses(state.zones,planet);
+    qgBonus+=tb.qgProdAll||0;
+    if(resourceKind==="crystal")qgBonus+=tb.qgCrystalProd||0;
+  }
+  return Math.round(base*lv*Math.pow(1.1,lv)*(1+(bonus||0)+techBonus+qgBonus)*branchMult);
+};
+// Max storage capacity — economic branch doubles it; coast QG = +10% global; tundra QG = +15% deut
+const getMaxStorage=(state,resource,planet)=>{
+  const bb=getBranchBonus(state);
+  const mult=(bb&&bb.storageMult)||1;
+  let qgBonus=0;
+  if(state&&state.zones){
+    const tb=getTerrainBonuses(state.zones,planet);
+    qgBonus+=tb.qgStorage||0;
+    if(resource==="deut")qgBonus+=tb.qgDeutStorage||0;
+  }
+  return Math.round(999999*mult*(1+qgBonus));
+};
+// Ship cost with branch bonuses (military: -5% cost per ship)
+const sCost=(ship,state,planet)=>{
+  const bb=getBranchBonus(state);
+  const mult=(bb&&bb.shipCostMult)||1;
+  const techReduction=getTechBonus(state,"shipCost");
+  // Zone bonus from hangar on coast/plain + QG bonus from mountain
+  let zoneReduction=0,qgReduction=0;
+  if(state&&state.zones){
+    const tb=getTerrainBonuses(state.zones,planet);
+    zoneReduction=tb.shipCost||0;
+    qgReduction=tb.qgShipCost||0;
+  }
+  const finalMult=mult*(1-techReduction)*(1-zoneReduction)*(1-qgReduction);
+  return{
+    metal:Math.round((ship.cost.metal||0)*finalMult),
+    crystal:Math.round((ship.cost.crystal||0)*finalMult),
+    deut:Math.round((ship.cost.deut||0)*finalMult),
+  };
+};
+// Ship build time multiplier (military: -15% time)
+const sTimeMult=(state)=>{const bb=getBranchBonus(state);return(bb&&bb.shipTimeMult)||1;};
+// Ship attack/defense multiplier (military: +10%)
+const sCombatMult=(state)=>{const bb=getBranchBonus(state);return(bb&&bb.shipAttackMult)||1;};
+// Fleet travel speed multiplier (exploration: +25%; desert QG: +10%)
+const fleetSpeedMult=(state,planet)=>{
+  const bb=getBranchBonus(state);
+  const branchMult=(bb&&bb.fleetSpeedMult)||1;
+  const techBonus=getTechBonus(state,"fleetSpeed");
+  let qgBonus=0;
+  if(state&&state.zones){const tb=getTerrainBonuses(state.zones,planet);qgBonus=tb.qgFleetSpeed||0;}
+  return branchMult*(1+techBonus+qgBonus);
+};
+// Fleet fuel (deuterium) consumption multiplier (exploration: -30%)
+const fuelMult=(state)=>{const bb=getBranchBonus(state);const branchMult=(bb&&bb.fuelMult)||1;const techReduction=getTechBonus(state,"fuelCost");return branchMult*(1-techReduction);};
+const eNeed=bld=>Math.round(10*(bld.mine_metal||0)*Math.pow(1.1,bld.mine_metal||0)+10*(bld.mine_crystal||0)*Math.pow(1.1,bld.mine_crystal||0)+20*(bld.synth_deut||0)*Math.pow(1.1,bld.synth_deut||0));
+const eProd=(lv,planet,state,zones)=>{
+  const base=Math.round(20*lv*Math.pow(1.1,lv));
+  const passive=getPassiveBonus(planet);
+  const eb=(passive&&passive.energy)||0;
+  const techBonus=getTechBonus(state,"energyProd");
+  let zoneBonus=0,qgBonus=0;
+  const z=zones||(state&&state.zones);
+  if(z){const tb=getTerrainBonuses(z,planet);zoneBonus=tb.energy||0;qgBonus=tb.qgEnergy||0;}
+  return Math.round(base*(1+eb+techBonus+zoneBonus+qgBonus));
+};
+const eRatio=(bld,planet,state,zones)=>{const n=eNeed(bld),p=eProd(bld.centrale||0,planet,state,zones);return n===0?1:Math.min(1,p/n);};
+const canAfford=(res,cost)=>res.metal>=cost.metal&&res.crystal>=cost.crystal&&res.deut>=(cost.deut||0);
+const deduct=(res,cost)=>({metal:res.metal-cost.metal,crystal:res.crystal-cost.crystal,deut:res.deut-(cost.deut||0)});
+const fmt=n=>{n=Math.floor(n);return n>=999500?(n/1e6).toFixed(n>=1e7?0:1).replace(".0","")+"M":n>=1e3?(n/1e3).toFixed(n>=1e4?0:1).replace(".0","")+"K":""+n;};
+const fmtT=s=>{if(s<=0)return"0s";const h=Math.floor(s/3600),m=Math.floor((s%3600)/60),sc=s%60;return h>0?h+"h"+m+"m":m>0?m+"m"+sc+"s":sc+"s";};
+function getTerrainBonuses(zones,planet){
+  const bon={metal:0,crystal:0,deut:0,energy:0,buildSpeed:0,shipCost:0,
+    qgStorage:0,qgProdAll:0,qgBuildCost:0,qgShipCost:0,qgEnergy:0,qgFleetSpeed:0,qgDeutStorage:0,qgCrystalProd:0};
+  // Zone-specific bonuses (building on matching terrain)
+  (zones||[]).forEach(z=>{
+    if(!z.building)return;
+    // QG: collect ALL qg* bonuses from its zone
+    if(z.building==="qg"){
+      const zb=(z.terrain&&z.terrain.bonuses)||{};
+      Object.keys(zb).forEach(k=>{
+        if(k.indexOf("qg")===0&&bon[k]!==undefined)bon[k]+=zb[k];
+      });
+      return;
+    }
+    const b=BUILDINGS.find(x=>x.id===z.building);
+    if(!b||!(b.terrainBonus&&b.terrainBonus.includes(z.type)))return;
+    const zoneBonuses=(z.terrain&&z.terrain.bonuses)||{};
+    if(b.produces==="metal"&&zoneBonuses.metal)bon.metal+=zoneBonuses.metal;
+    else if(b.produces==="crystal"&&zoneBonuses.crystal)bon.crystal+=zoneBonuses.crystal;
+    else if(b.produces==="deut"&&zoneBonuses.deut)bon.deut+=zoneBonuses.deut;
+    else if(b.produces==="energy"&&zoneBonuses.energy)bon.energy+=zoneBonuses.energy;
+    else if(b.produces==="speed"&&zoneBonuses.buildSpeed)bon.buildSpeed+=zoneBonuses.buildSpeed;
+    else if(b.produces==="ships"&&zoneBonuses.shipCost)bon.shipCost+=zoneBonuses.shipCost;
+  });
+  // Passive planet-type bonus (modulated by habitability)
+  const passive=getPassiveBonus(planet);
+  if(passive){
+    if(passive.metal)bon.metal+=passive.metal;
+    if(passive.crystal)bon.crystal+=passive.crystal;
+    if(passive.deut)bon.deut+=passive.deut;
+  }
+  return bon;
+}
+function initState(planet){
+  const continents=generateContinents(planet);
+  const zones=continents.flatMap(c=>c.zones);
+  return{resources:{metal:500,crystal:300,deut:100},
+    buildings:{qg:0,mine_metal:0,mine_crystal:0,synth_deut:0,centrale:0,usine_robots:0,hangar:0,laboratoire:0},
+    ships:{chasseur:0,cargo:0,croiseur:0},
+    tech:{},researchQueue:null,
+    continents,continentVersion:CONTINENT_VERSION,zones,queue:null,fleets:[],lastTick:Date.now(),planetType:planet.type,
+    missionsClaimed:[],missionFlags:{},needsQGPlacement:true};
+}
+
+function loadGS(uid){try{const r=localStorage.getItem(K.state(uid));return r?JSON.parse(r):null;}catch{return null;}}
+function saveGS(uid,s){try{localStorage.setItem(K.state(uid),JSON.stringify(s));}catch{}}
+
+// ────────────────────────────────────────────────────
+// BOT SEEDING — populates the galaxy with fictional players for testing/demo
+// ────────────────────────────────────────────────────
+const BOT_NAMES=["Vega Prime","Stellar Wolf","NovaCrusher","Orion","Andromeda","Cygnus","Solaris","Phoenix","Atlas","Hydra","Lyra","Nebula","Cosmos Rex","DarkMatter","Quantum","Polaris","Sirius","Centauri","Zenith","Eclipse"];
+function seedBots(gSeed,playerIdx){
+  // Don't seed twice for the same gSeed
+  const flagKey="gx_bots_seeded_v3_"+gSeed;
+  if(localStorage.getItem(flagKey))return;
+  const u=loadUsers();
+  // Find which slots are already taken in this gSeed (by real users)
+  const takenSlots=new Set([playerIdx]);
+  Object.values(u).forEach(x=>{if(x.botSlot!==undefined&&x.botGSeed===gSeed){takenSlots.add(x.botSlot);}else{const s=slotOf(x.id);if(s.gSeed===gSeed)takenSlots.add(s.idx);}});
+  // Pick 15 free slots (out of the 50 total)
+  const freeSlots=[];
+  for(let i=0;i<50;i++)if(!takenSlots.has(i))freeSlots.push(i);
+  // Shuffle and take 15
+  for(let i=freeSlots.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[freeSlots[i],freeSlots[j]]=[freeSlots[j],freeSlots[i]];}
+  const targetCount=Math.min(15,freeSlots.length);
+  for(let n=0;n<targetCount;n++){
+    const botSlot=freeSlots[n];
+    const botId="bot_"+gSeed+"_"+botSlot;
+    const name=BOT_NAMES[(n*7+gSeed)%BOT_NAMES.length]+" "+(n+1);
+    u[botId]={id:botId,name,email:botId+"@bot.local",hash:"",isBot:true,botSlot,botGSeed:gSeed};
+    // Build the bot's state: random progression
+    const r=()=>Math.random();
+    const tier=r();
+    const branchPick=r();
+    const branch=branchPick<0.4?"eco":branchPick<0.75?"mil":"exp";
+    const lv=(min,maxLow,maxHigh)=>Math.floor(min+r()*(min<2?maxLow:maxLow+(maxHigh-maxLow)*tier));
+    const buildings={
+      qg:Math.max(1,lv(1,3,8)),
+      mine_metal:lv(0,4,12),
+      mine_crystal:lv(0,3,10),
+      synth_deut:lv(0,2,8),
+      centrale:lv(0,3,10),
+      usine_robots:lv(0,2,7),
+      hangar:lv(0,2,6),
+      laboratoire:lv(0,1,5),
+    };
+    const resScale=200+tier*8000;
+    const resources={
+      metal:Math.floor(resScale*(0.5+r()*1.5)),
+      crystal:Math.floor(resScale*(0.4+r()*1.2)),
+      deut:Math.floor(resScale*(0.2+r()*0.8)),
+    };
+    const COLOR_IDS=["azure","gold","crimson","emerald","violet","teal","rose","silver"];
+    const profile={
+      colorId:COLOR_IDS[Math.floor(r()*COLOR_IDS.length)],
+      bannerId:"nebula",
+      activeTitle:null,
+      quote:"",
+      avatarContent:"initials",
+    };
+    const missionsClaimed=tier>0.4?["m1_first_mine","m2_metal_5","m3_crystal_3"]:["m1_first_mine"];
+    if(tier>0.5)missionsClaimed.push("m12_branch_choice");
+    const missionFlags=tier>0.5?{chosenBranch:branch}:{};
+    // Ships — military bots have more, explorers have cargos, eco bots have minimal fleet
+    let chasseurs=0,cargos=0,croiseurs=0;
+    if(branch==="mil"){chasseurs=lv(2,8,30);cargos=lv(0,2,6);croiseurs=lv(0,1,8);}
+    else if(branch==="exp"){chasseurs=lv(1,3,12);cargos=lv(2,5,15);croiseurs=lv(0,0,4);}
+    else{chasseurs=lv(0,2,8);cargos=lv(0,2,8);croiseurs=lv(0,0,2);}
+    // Technologies — only for established bots (tier > 0.5)
+    const techData={};
+    if(tier>0.5){
+      // A few common techs
+      techData.tech_extraction=lv(0,2,8);
+      techData.tech_crystal=lv(0,2,8);
+      // Branch-specific tech
+      if(branch==="mil"){techData.tech_weapons=lv(0,2,7);techData.tech_armor=lv(0,1,5);}
+      else if(branch==="exp"){techData.tech_hyperdrive=lv(0,2,7);techData.tech_cartography=lv(0,1,5);}
+      else{techData.tech_recycling=lv(0,1,5);techData.tech_geothermal=lv(0,2,7);}
+    }
+    const botState={
+      resources,
+      buildings,
+      ships:{chasseur:chasseurs,cargo:cargos,croiseur:croiseurs},
+      tech:techData,researchQueue:null,
+      continents:[],continentVersion:0,zones:[],queue:null,fleets:[],
+      lastTick:Date.now(),
+      planetType:"Tellurique",
+      planetName:name+"'s Pride",
+      missionsClaimed,missionFlags,
+      profile,titles:[],cosmetics:[],
+      empire:[],
+      needsQGPlacement:false,
+    };
+    saveGS(botId,botState);
+  }
+  saveUsers(u);
+  localStorage.setItem(flagKey,"1");
+}// Colony state helpers — each colonized planet has its own mini-state stored separately.
+// Key format: gx_colony_{uid}_{planetIdx}. The "empire" is tracked in the main state under myState.empire.
+const colonyKey=(uid,planetIdx)=>"gx_colony_"+uid+"_"+planetIdx;
+function loadColony(uid,planetIdx){try{const r=localStorage.getItem(colonyKey(uid,planetIdx));return r?JSON.parse(r):null;}catch{return null;}}
+function saveColony(uid,planetIdx,s){try{localStorage.setItem(colonyKey(uid,planetIdx),JSON.stringify(s));}catch{}}
+// Colonization cost (scales with how many colonies you already own)
+function colonizationCost(existingColonies){
+  // Base cost + 50% per extra colony already owned (so 2nd colony costs base, 3rd costs 1.5x, etc.)
+  const mult=1+existingColonies*0.5;
+  return{metal:Math.floor(30000*mult),crystal:Math.floor(20000*mult),deut:Math.floor(10000*mult)};
+}
+// Max colonies allowed based on QG level of the home planet.
+function maxColoniesFor(qgLv){
+  if(qgLv>=15)return 5;
+  if(qgLv>=12)return 4;
+  if(qgLv>=8)return 3;
+  if(qgLv>=5)return 2;
+  return 0; // QG <5 cannot colonize yet
+}
+function tickGS(s,planet){
+  // Migrate to continent system if needed (handles version bumps too)
+  if(!s.continents||s.continentVersion!==CONTINENT_VERSION) s=migrateToContinents(s,planet);
+  // Initialize missions tracking on older saves
+  if(!s.missionsClaimed)s.missionsClaimed=[];
+  // Migrate: derive state.cosmetics from missionsClaimed so old saves get their unlocks
+  if(!s.cosmetics)s.cosmetics=deriveUnlockedCosmetics(s);
+  if(!s.missionFlags)s.missionFlags={};
+  // Migration: update zone names to match their terrain type
+  if(s.continents){
+    s.continents.forEach(cont=>{
+      cont.zones.forEach((z,zi)=>{
+        const pool=ZONE_NAMES_BY_TYPE[z.type];
+        if(pool){
+          const newName=pool[(cont.id*4+zi)%pool.length];
+          if(z.name!==newName)z.name=newName;
+        }
+      });
+    });
+  }
+  // Migration: refresh each zone's terrain bonuses from current TERRAIN_TYPES
+  // (important when bonus types/values change — existing saves pick up new definitions)
+  if(s.continents){
+    s.continents.forEach(cont=>{
+      cont.zones.forEach(z=>{
+        const current=TERRAIN_TYPES[z.type];
+        if(current){
+          z.terrain={name:current.name,icon:current.icon,bonuses:{...current.bonuses},buildable:current.buildable};
+        }
+      });
+    });
+  }
+  if(s.zones){
+    s.zones.forEach(z=>{
+      const current=TERRAIN_TYPES[z.type];
+      if(current){
+        z.terrain={name:current.name,icon:current.icon,bonuses:{...current.bonuses},buildable:current.buildable};
+      }
+    });
+  }
+  // Migration: enforce 3/3/2 zone distribution across 3 continents (8 zones total)
+  if(s.continents&&s.continents.length===3){
+    const expected=[3,3,2];
+    const needsRebuild=s.continents.some((c,i)=>!c.zones||c.zones.length!==expected[i]);
+    if(needsRebuild){
+      const pool=(planet&&ZONE_POOL[planet.type])||["plain","forest","mountain","coast","desert"];
+      s.continents.forEach((cont,ci)=>{
+        const targetCount=expected[ci];
+        const currentZones=cont.zones||[];
+        if(currentZones.length===targetCount)return;
+        // Preserve existing buildings
+        const builtZones=currentZones.filter(z=>z.building);
+        const r4=rng((cont.id+3)*7919);
+        const uniquePool=Array.from(new Set(pool));
+        for(let k=uniquePool.length-1;k>0;k--){
+          const j=Math.floor(r4()*(k+1));
+          const tmp=uniquePool[k];uniquePool[k]=uniquePool[j];uniquePool[j]=tmp;
+        }
+        const newZones=[];
+        // Add built zones first (keep their IDs and buildings)
+        builtZones.forEach(z=>{if(newZones.length<targetCount)newZones.push(z);});
+        // Fill with new unique-type zones
+        let tIdx=0;
+        while(newZones.length<targetCount){
+          const usedTypes=new Set(newZones.map(z=>z.type));
+          let newType=uniquePool[tIdx++%uniquePool.length];
+          let attempts=0;
+          while(usedTypes.has(newType)&&attempts<uniquePool.length){
+            newType=uniquePool[tIdx++%uniquePool.length];
+            attempts++;
+          }
+          const terrain=TERRAIN_TYPES[newType]||TERRAIN_TYPES.plain;
+          const namePool=ZONE_NAMES_BY_TYPE[newType]||ZONE_NAMES;
+          const zi=newZones.length;
+          const dp=(r4()-0.5)*0.28,dt=r4()*Math.PI*2;
+          const lx2=cont.cx+Math.cos(dt)*dp,ly2=cont.cy+(r4()-0.5)*0.28,lz2=cont.cz+Math.sin(dt)*dp;
+          const len=Math.sqrt(lx2*lx2+ly2*ly2+lz2*lz2);
+          newZones.push({
+            id:cont.id*10+zi,name:namePool[(cont.id*4+zi)%namePool.length],type:newType,terrain,
+            lx:lx2/len,ly:ly2/len,lz:lz2/len,
+            mapX:0.5,mapY:0.5,building:null
+          });
+        }
+        cont.zones=newZones;
+      });
+    }
+  }
+  // Migration: deduplicate zones with same type on same continent (old saves had dupes)
+  if(s.continents){
+    s.continents.forEach(cont=>{
+      if(!cont.zones||cont.zones.length<=1)return;
+      const pool=(planet&&ZONE_POOL[planet.type])||["plain","forest","mountain","coast","desert"];
+      const uniquePool=Array.from(new Set(pool));
+      // Check for any duplicates
+      const typeCount={};
+      cont.zones.forEach(z=>{typeCount[z.type]=(typeCount[z.type]||0)+1;});
+      const hasDupes=Object.values(typeCount).some(c=>c>1);
+      if(hasDupes){
+        // Fisher-Yates shuffle uniquePool deterministically per continent
+        const r3=rng((cont.id+7)*13337);
+        for(let k=uniquePool.length-1;k>0;k--){
+          const j=Math.floor(r3()*(k+1));
+          const tmp=uniquePool[k];uniquePool[k]=uniquePool[j];uniquePool[j]=tmp;
+        }
+        // Reassign each zone to a unique type (fall back to random from pool if too many zones)
+        cont.zones.forEach((z,zi)=>{
+          const newType=zi<uniquePool.length?uniquePool[zi]:pool[Math.floor(r3()*pool.length)];
+          z.type=newType;
+          z.terrain=TERRAIN_TYPES[newType]||TERRAIN_TYPES.plain;
+          // Also refresh the name to match the new type
+          const namePool=ZONE_NAMES_BY_TYPE[newType]||ZONE_NAMES;
+          z.name=namePool[(cont.id*4+zi)%namePool.length];
+        });
+      }
+    });
+  }
+  // Migration: re-position zones into slots to avoid overlap
+  if(s.continents){
+    s.continents.forEach(cont=>{
+      const nZones=cont.zones.length;
+      const r2=rng((cont.id+1)*31337);
+      const flip=r2()<0.5;
+      let slots;
+      if(nZones===4){
+        slots=flip?[
+          {mapX:0.22,mapY:0.25},{mapX:0.78,mapY:0.25},{mapX:0.22,mapY:0.75},{mapX:0.78,mapY:0.75}
+        ]:[
+          {mapX:0.78,mapY:0.25},{mapX:0.22,mapY:0.25},{mapX:0.78,mapY:0.75},{mapX:0.22,mapY:0.75}
+        ];
+      }else if(nZones===3){
+        slots=flip?[
+          {mapX:0.50,mapY:0.24},{mapX:0.20,mapY:0.76},{mapX:0.80,mapY:0.76}
+        ]:[
+          {mapX:0.50,mapY:0.24},{mapX:0.80,mapY:0.76},{mapX:0.20,mapY:0.76}
+        ];
+      }else if(nZones===2){
+        slots=flip?[
+          {mapX:0.28,mapY:0.50},{mapX:0.72,mapY:0.50}
+        ]:[
+          {mapX:0.72,mapY:0.50},{mapX:0.28,mapY:0.50}
+        ];
+      }else{
+        slots=[{mapX:0.5,mapY:0.5}];
+      }
+      cont.zones.forEach((z,zi)=>{
+        const slot=slots[zi]||{mapX:0.5,mapY:0.5};
+        z.mapX=slot.mapX+(r2()-0.5)*0.015;
+        z.mapY=slot.mapY+(r2()-0.5)*0.015;
+      });
+    });
+  }
+  if(s.buildings&&s.buildings.qg===undefined){
+    // Check if a QG is already placed in zones (legacy save)
+    const hasPlacedQG=(s.zones||[]).some(z=>z.building==="qg");
+    s={...s,buildings:{...s.buildings,qg:hasPlacedQG?1:0},needsQGPlacement:!hasPlacedQG};
+  }
+  if(!s.tech)s.tech={};
+  if(s.researchQueue===undefined)s.researchQueue=null;
+  if(s.buildings&&s.buildings.laboratoire===undefined)s.buildings.laboratoire=0;
+  if(!s.planetType&&planet) s={...s,planetType:planet.type};
+  if(!s.anomalies)s.anomalies=[];
+  if(s.nextAnomalyAt===undefined)s.nextAnomalyAt=null;
+
+  const now=Date.now(),dt=(now-s.lastTick)/3600000,ratio=eRatio(s.buildings,planet,s,s.zones),tb=getTerrainBonuses(s.zones,planet);
+  const ns={...s,resources:{...s.resources},buildings:{...s.buildings},ships:{...s.ships},zones:[...(s.zones||[])],fleets:[...(s.fleets||[])],lastTick:now,anomalies:[].concat(s.anomalies||[])};
+  updateAnomalies(ns,now);
+  ns.resources.metal  =Math.min(getMaxStorage(ns,"metal",planet),  ns.resources.metal  +prodH(ns.buildings.mine_metal  ||0,30,tb.metal,ns,"metal",planet)*ratio*dt);
+  ns.resources.crystal=Math.min(getMaxStorage(ns,"crystal",planet),ns.resources.crystal+prodH(ns.buildings.mine_crystal||0,20,tb.crystal,ns,"crystal",planet)*ratio*dt);
+  ns.resources.deut   =Math.min(getMaxStorage(ns,"deut",planet),   ns.resources.deut   +prodH(ns.buildings.synth_deut  ||0,10,tb.deut,ns,"deut",planet)*ratio*dt);
+  if(ns.queue&&now>=ns.queue.finishAt&&!ns.queue.ready){
+    ns.queue={...ns.queue,ready:true};
+  }
+  // Research auto-completes in parallel with build queue
+  if(ns.researchQueue&&now>=ns.researchQueue.finishAt){
+    const techId=ns.researchQueue.techId;
+    ns.tech={...(ns.tech||{}),[techId]:(ns.tech&&ns.tech[techId]||0)+1};
+    ns.researchQueue=null;
+  }
+  // Sync zones from continents
+  if(ns.continents) ns.zones=ns.continents.flatMap(c=>c.zones);
+  ns.fleets=ns.fleets.filter(function(f){
+    // Anomaly mission: if reached anomaly position and not yet returning, decide outcome
+    if(f.kind==="anomaly"&&now>=f.arriveAt&&!f.returning){
+      // Check if anomaly still exists
+      var anomStillExists=false;
+      var anomList=ns.anomalies||[];
+      for(var ai=0;ai<anomList.length;ai++){
+        if(anomList[ai].id===f.anomalyId){anomStillExists=true;break;}
+      }
+      f.returning=true;
+      var dur=f.arriveAt-f.departAt;
+      f.departAt=now;
+      f.arriveAt=now+dur;
+      if(anomStillExists){
+        f.anomalySuccess=true;
+        // Remove the anomaly from the list (consumed)
+        ns.anomalies=anomList.filter(function(a){return a.id!==f.anomalyId;});
+      } else {
+        f.anomalySuccess=false;
+      }
+      return true;
+    }
+    // Standard planet fleet
+    if(now>=f.arriveAt&&!f.returning){f.returning=true;var dur2=f.arriveAt-f.departAt;f.departAt=now;f.arriveAt=now+dur2;}
+    if(f.returning&&now>=f.arriveAt){
+      // Apply rewards on arrival back at base
+      if(f.kind==="anomaly"){
+        if(f.anomalySuccess&&f.anomalyReward){
+          var rw=f.anomalyReward;
+          if(rw.kind==="resources"){
+            ns.resources.metal+=rw.metal||0;
+            ns.resources.crystal+=rw.crystal||0;
+            ns.resources.deut+=rw.deut||0;
+          } else if(rw.kind==="boost"){
+            // Store boost in state; production logic will need to read it
+            if(!ns.activeBoosts)ns.activeBoosts=[];
+            ns.activeBoosts.push({type:rw.boostType,percent:rw.percent,expiresAt:now+rw.durationMs,source:"anomaly"});
+          } else if(rw.kind==="tech_or_boost"){
+            // 50/50: tech credit (only if Laboratoire) OR boost (or fallback to boost if no lab)
+            var hasLab=(ns.buildings&&(ns.buildings.laboratoire||0)>=1);
+            var roll=Math.random();
+            if(roll<0.5&&hasLab){
+              // Tech credit — will trigger choice modal
+              if(!ns.pendingTechCredits)ns.pendingTechCredits=0;
+              ns.pendingTechCredits+=1;
+              f.anomalyOutcome="tech";
+            } else {
+              // Boost (also fallback when no lab)
+              if(!ns.activeBoosts)ns.activeBoosts=[];
+              ns.activeBoosts.push({type:"global",percent:rw.boostPercent,expiresAt:now+rw.boostDurationMs,source:"anomaly_etude"});
+              f.anomalyOutcome=(roll<0.5&&!hasLab)?"boost_no_lab":"boost";
+            }
+          }
+        }
+        // Add notification flag (for UI to display)
+        if(!ns.anomalyNotifs)ns.anomalyNotifs=[];
+        ns.anomalyNotifs.push({id:f.id,success:f.anomalySuccess,reward:f.anomalyReward,returnedAt:now});
+        // Restore the cargos used (they come back!)
+        if(f.ships){
+          if(!ns.ships)ns.ships={};
+          for(var k in f.ships){if(f.ships.hasOwnProperty(k))ns.ships[k]=(ns.ships[k]||0)+f.ships[k];}
+        }
+      } else {
+        // Standard planet fleet rewards
+        ns.resources.metal+=f.cm||0;
+        ns.resources.crystal+=f.cc||0;
+      }
+      return false;
+    }
+    return true;
+  });
+  return ns;
+}
+function orbitPos(p,t){
+  const a=p.orbitAngle3d+t*p.orbitSpeed,lx=Math.cos(a)*p.orbitRadius3d,lz=Math.sin(a)*p.orbitRadius3d;
+  const yi=lz*Math.sin(p.orbitInc),zi=lz*Math.cos(p.orbitInc);
+  const x=lx*Math.cos(p.orbitAsc)-zi*Math.sin(p.orbitAsc),z=lx*Math.sin(p.orbitAsc)+zi*Math.cos(p.orbitAsc);
+  return{x,y:yi,z};
+}
+
+function GalaxyMap3D({planets,playerIdx,myColonyIndices,onSelect,gSeed}){
+  const mountRef=useRef(),stateRef=useRef({});
+  const camDrag=useRef({on:false,x:0,y:0,theta:0.4,phi:0.8,vTheta:0,vPhi:0,dist:28,moved:false,tx:0,ty:0,tz:0,panMode:false,pMoved:false});
+  useEffect(()=>{
+    if(!window.THREE||!planets||!mountRef.current)return;
+    const T=window.THREE,div=mountRef.current;
+    if(stateRef.current.af)cancelAnimationFrame(stateRef.current.af);
+    if(stateRef.current.renderer){try{stateRef.current.renderer.forceContextLoss&&stateRef.current.renderer.forceContextLoss();}catch(e){}stateRef.current.renderer.dispose();while(div.firstChild)div.removeChild(div.firstChild);}
+    const W=div.clientWidth||window.innerWidth||500,H=div.clientHeight||window.innerHeight||400;
+    const renderer=new T.WebGLRenderer({antialias:true,alpha:false});
+    renderer.setSize(W,H);renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
+    renderer.setClearColor(0x000005,1);div.appendChild(renderer.domElement);
+    const scene=new T.Scene(),cam=new T.PerspectiveCamera(55,W/H,0.1,500);
+    const nebCv=genNebulaTexture(gSeed,1024),nebTex=new T.CanvasTexture(nebCv);
+    const nebMesh=new T.Mesh(new T.SphereGeometry(220,32,32),new T.MeshBasicMaterial({map:nebTex,side:T.BackSide,transparent:true,opacity:.85,depthWrite:false}));
+    scene.add(nebMesh);
+    // Second nebula layer rotating opposite direction for depth parallax
+    const nebCv2=genNebulaTexture(gSeed+31337,1024),nebTex2=new T.CanvasTexture(nebCv2);
+    const nebMesh2=new T.Mesh(new T.SphereGeometry(180,32,32),new T.MeshBasicMaterial({map:nebTex2,side:T.BackSide,transparent:true,opacity:.45,depthWrite:false,blending:T.AdditiveBlending}));
+    scene.add(nebMesh2);
+    // Star layers — will twinkle at different frequencies
+    const starLayers=[];
+    [[5000,100,180,.12,.95,0xffffff,2.4],[3000,80,130,.18,.6,0xddeeff,1.7],[1500,60,100,.28,.4,0xaaccff,1.1],[800,50,80,.38,.3,0xffffcc,0.8]].forEach(([cnt,mn,mx,sz,op,col,freq])=>{
+      const sp=new Float32Array(cnt*3);
+      for(let i=0;i<cnt*3;i+=3){const a=Math.random()*Math.PI*2,b=Math.acos(2*Math.random()-1),r=mn+Math.random()*(mx-mn);sp[i]=r*Math.sin(b)*Math.cos(a);sp[i+1]=r*Math.sin(b)*Math.sin(a);sp[i+2]=r*Math.cos(b);}
+      const sg=new T.BufferGeometry();sg.setAttribute("position",new T.BufferAttribute(sp,3));
+      const mat=new T.PointsMaterial({color:col,size:sz,transparent:true,opacity:op});
+      const pts=new T.Points(sg,mat);
+      scene.add(pts);
+      starLayers.push({mat,baseOp:op,freq,phase:Math.random()*Math.PI*2});
+    });
+    // Bright scintillating stars — rare but noticeable (foreground twinkle)
+    const brightStarCount=80;
+    const bspts=new Float32Array(brightStarCount*3);
+    const bssizes=new Float32Array(brightStarCount);
+    for(let i=0;i<brightStarCount;i++){
+      const a=Math.random()*Math.PI*2,b=Math.acos(2*Math.random()-1),r=70+Math.random()*90;
+      bspts[i*3]=r*Math.sin(b)*Math.cos(a);bspts[i*3+1]=r*Math.sin(b)*Math.sin(a);bspts[i*3+2]=r*Math.cos(b);
+      bssizes[i]=0.8+Math.random()*0.8;
+    }
+    const bsGeo=new T.BufferGeometry();bsGeo.setAttribute("position",new T.BufferAttribute(bspts,3));
+    const bsMat=new T.PointsMaterial({color:0xffffff,size:0.5,transparent:true,opacity:0.9,blending:T.AdditiveBlending,depthWrite:false});
+    const brightStars=new T.Points(bsGeo,bsMat);
+    scene.add(brightStars);
+    const brightStarData=Array.from({length:brightStarCount},()=>({freq:0.5+Math.random()*3,phase:Math.random()*Math.PI*2}));
+    // Floating space dust — close to camera, drifts slowly
+    const dustCount=400;
+    const dustPts=new Float32Array(dustCount*3);
+    const dustVel=[];
+    for(let i=0;i<dustCount;i++){
+      dustPts[i*3]=(Math.random()-.5)*60;
+      dustPts[i*3+1]=(Math.random()-.5)*60;
+      dustPts[i*3+2]=(Math.random()-.5)*60;
+      dustVel.push({vx:(Math.random()-.5)*0.01,vy:(Math.random()-.5)*0.005,vz:(Math.random()-.5)*0.01});
+    }
+    const dustGeo=new T.BufferGeometry();dustGeo.setAttribute("position",new T.BufferAttribute(dustPts,3));
+    const dustMat=new T.PointsMaterial({color:0xaabbdd,size:0.15,transparent:true,opacity:0.35,blending:T.AdditiveBlending,depthWrite:false});
+    scene.add(new T.Points(dustGeo,dustMat));
+    // Comet system — occasionally spawns a comet with a trail
+    const comets=[];
+    const makeComet=()=>{
+      const startA=Math.random()*Math.PI*2,startB=Math.acos(2*Math.random()-1),startR=60;
+      const start=new T.Vector3(startR*Math.sin(startB)*Math.cos(startA),startR*Math.sin(startB)*Math.sin(startA),startR*Math.cos(startB));
+      const endA=startA+Math.PI+(Math.random()-.5)*0.8;
+      const end=new T.Vector3(startR*Math.sin(startB)*Math.cos(endA),startR*Math.sin(startB+(Math.random()-.5)*0.4)*Math.sin(endA),startR*Math.cos(startB));
+      const trail=new T.BufferGeometry();
+      const trailLen=30;
+      const trailPts=new Float32Array(trailLen*3);
+      for(let i=0;i<trailLen*3;i++)trailPts[i]=start.x;
+      trail.setAttribute("position",new T.BufferAttribute(trailPts,3));
+      const col=new T.Color().setHSL(0.55+Math.random()*0.2,0.8,0.7);
+      const trailMat=new T.LineBasicMaterial({color:col,transparent:true,opacity:0.8,blending:T.AdditiveBlending,depthWrite:false});
+      const trailLine=new T.Line(trail,trailMat);
+      scene.add(trailLine);
+      const headMat=new T.SpriteMaterial({map:(function(){const c=document.createElement("canvas");c.width=c.height=32;const g=c.getContext("2d");const gr=g.createRadialGradient(16,16,0,16,16,16);gr.addColorStop(0,"rgba(255,255,255,1)");gr.addColorStop(.3,"rgba(200,230,255,.8)");gr.addColorStop(1,"rgba(200,230,255,0)");g.fillStyle=gr;g.fillRect(0,0,32,32);return new T.CanvasTexture(c);})(),transparent:true,opacity:0.9,blending:T.AdditiveBlending,depthTest:false});
+      const head=new T.Sprite(headMat);
+      head.scale.set(2,2,1);
+      scene.add(head);
+      comets.push({start,end,progress:0,speed:0.003+Math.random()*0.003,trail,trailLine,head,trailLen,alive:true,color:col});
+    };
+    let nextCometAt=2+Math.random()*6;
+    // Passing ships — small ships that traverse between random points
+    const ships=[];
+    const makeShip=()=>{
+      // Pick two random points in the galaxy to fly between
+      const a1=Math.random()*Math.PI*2,r1=8+Math.random()*20;
+      const a2=a1+Math.PI*0.4+Math.random()*Math.PI*1.2,r2=8+Math.random()*20;
+      const start=new T.Vector3(Math.cos(a1)*r1,(Math.random()-.5)*6,Math.sin(a1)*r1);
+      const end=new T.Vector3(Math.cos(a2)*r2,(Math.random()-.5)*6,Math.sin(a2)*r2);
+      // Ship body — small elongated triangle/diamond
+      const shipGroup=new T.Group();
+      const bodyGeo=new T.ConeGeometry(0.08,0.3,6);
+      bodyGeo.rotateX(Math.PI/2);
+      const shipCol=[0x88aadd,0xaaccff,0xffcc88,0xddeeff][Math.floor(Math.random()*4)];
+      const body=new T.Mesh(bodyGeo,new T.MeshBasicMaterial({color:shipCol}));
+      shipGroup.add(body);
+      // Glow sprite for engine
+      const engGlow=new T.Sprite(new T.SpriteMaterial({map:(function(){const c=document.createElement("canvas");c.width=c.height=32;const g=c.getContext("2d");const gr=g.createRadialGradient(16,16,0,16,16,16);gr.addColorStop(0,"rgba(255,200,100,1)");gr.addColorStop(.4,"rgba(255,150,50,.5)");gr.addColorStop(1,"rgba(255,100,0,0)");g.fillStyle=gr;g.fillRect(0,0,32,32);return new T.CanvasTexture(c);})(),transparent:true,opacity:0.9,blending:T.AdditiveBlending,depthTest:false}));
+      engGlow.scale.set(0.5,0.5,1);
+      engGlow.position.z=-0.2;
+      shipGroup.add(engGlow);
+      // Engine trail
+      const trailGeo=new T.BufferGeometry();
+      const trailLen=15;
+      const trailPts=new Float32Array(trailLen*3);
+      for(let i=0;i<trailLen*3;i++)trailPts[i]=start.x;
+      trailGeo.setAttribute("position",new T.BufferAttribute(trailPts,3));
+      const trailMat=new T.LineBasicMaterial({color:shipCol,transparent:true,opacity:0.5,blending:T.AdditiveBlending,depthWrite:false});
+      const trailLine=new T.Line(trailGeo,trailMat);
+      scene.add(trailLine);
+      scene.add(shipGroup);
+      ships.push({group:shipGroup,start,end,progress:0,speed:0.002+Math.random()*0.002,trailGeo,trailLine,trailLen,body,engGlow});
+    };
+    let nextShipAt=1+Math.random()*3;
+    // Camera zoom target when a planet is clicked/selected
+    const zoomTarget={active:false,target:null,startDist:0,t:0};
+    const mwp=new Float32Array(4000);
+    for(let i=0;i<4000;i+=3){const a=Math.random()*Math.PI*2,s=(Math.random()-.5)*.25,r=90+Math.random()*40;mwp[i]=r*Math.cos(a);mwp[i+1]=r*Math.sin(s)*6;mwp[i+2]=r*Math.sin(a);}
+    const mwg=new T.BufferGeometry();mwg.setAttribute("position",new T.BufferAttribute(mwp,3));
+    scene.add(new T.Points(mwg,new T.PointsMaterial({color:0x8899cc,size:.08,transparent:true,opacity:.3})));
+    const sunMesh=new T.Mesh(new T.SphereGeometry(1.2,32,32),new T.MeshBasicMaterial({color:0xfff8e0}));scene.add(sunMesh);
+    // Softer, more realistic corona — tighter layers with lower opacity and warmer gradient
+    [[1.6,.18,0xfff0b0],[2.2,.08,0xffdd70],[3.2,.04,0xffb040],[5.0,.015,0xff7020]].forEach(([r,op,col])=>{
+      scene.add(new T.Mesh(new T.SphereGeometry(r,24,24),new T.MeshBasicMaterial({color:col,transparent:true,opacity:op,side:T.BackSide,blending:T.AdditiveBlending,depthWrite:false})));
+    });
+    const flareCv=document.createElement("canvas");flareCv.width=flareCv.height=128;
+    const fCtx=flareCv.getContext("2d"),fGrad=fCtx.createRadialGradient(64,64,0,64,64,64);
+    // Softer, more natural falloff
+    fGrad.addColorStop(0,"rgba(255,250,220,0.85)");
+    fGrad.addColorStop(0.15,"rgba(255,235,170,0.55)");
+    fGrad.addColorStop(0.45,"rgba(255,195,100,0.18)");
+    fGrad.addColorStop(0.75,"rgba(255,150,60,0.05)");
+    fGrad.addColorStop(1,"rgba(255,100,30,0)");
+    fCtx.fillStyle=fGrad;fCtx.fillRect(0,0,128,128);
+    const flare=new T.Sprite(new T.SpriteMaterial({map:new T.CanvasTexture(flareCv),transparent:true,opacity:.35,blending:T.AdditiveBlending,depthTest:false}));
+    flare.scale.set(4.5,4.5,1);scene.add(flare);
+    scene.add(new T.PointLight(0xfff5e0,2.2,80));scene.add(new T.AmbientLight(0x030510,.8));
+    planets.forEach(p=>{
+      const pts=[];
+      for(let a=0;a<=Math.PI*2;a+=Math.PI/48){
+        const lx=Math.cos(a)*p.orbitRadius3d,lz=Math.sin(a)*p.orbitRadius3d;
+        const yi=lz*Math.sin(p.orbitInc),zi=lz*Math.cos(p.orbitInc);
+        const x=lx*Math.cos(p.orbitAsc)-zi*Math.sin(p.orbitAsc),z=lx*Math.sin(p.orbitAsc)+zi*Math.cos(p.orbitAsc);
+        pts.push(new T.Vector3(x,yi,z));
+      }
+      // Wild orbits: paler and more translucent to keep focus on natal ring
+      scene.add(new T.Line(new T.BufferGeometry().setFromPoints(pts),new T.LineBasicMaterial({color:p.isWild?0x2a3a50:0x1a2a44,transparent:true,opacity:p.isWild?0.08:.2})));
+    });
+    const planetMeshes=[];
+    planets.forEach((p,i)=>{
+      const size=(0.14+(p.size/15000)*0.24)*1.7*(p.isWild?0.75:1); // wilds slightly smaller
+      const miniTex=new T.CanvasTexture(genMiniTexture(p));miniTex.anisotropy=2;
+      const mat=p.isWild
+        ?new T.MeshPhongMaterial({map:miniTex,bumpMap:miniTex,bumpScale:.01,shininess:10,transparent:true,opacity:0.55,emissive:new T.Color(0.15,0.18,0.25),emissiveIntensity:0.4})
+        :new T.MeshPhongMaterial({map:miniTex,bumpMap:miniTex,bumpScale:.015,shininess:p.water>20?20:5});
+      const mesh=new T.Mesh(new T.SphereGeometry(size,24,24),mat);
+      scene.add(mesh);
+      // Wild planets get a soft white halo to mark them as "dormant/available"
+      if(p.isWild){
+        const halo=new T.Mesh(new T.SphereGeometry(size*1.45,16,16),new T.MeshBasicMaterial({color:0xddeeff,transparent:true,opacity:0.09,side:T.BackSide,blending:T.AdditiveBlending,depthWrite:false}));
+        mesh.add(halo);
+      }
+      const GC3={Tellurique:0x3d8a50,Gazeuse:0xc87828,Glaciale:0x70b8d8,Desertique:0xc8a040,Oceanique:0x1858c8,Volcanique:0xb02818,Forestiere:0x287028};
+      const ac=({Dense:new T.Color(.28,.52,1),Legere:new T.Color(.35,.6,1),Toxique:new T.Color(.55,.85,.2),Respirable:new T.Color(.25,.55,1),Tempetueuse:new T.Color(.6,.45,.85)})[p.atmos];
+      if(ac)mesh.add(new T.Mesh(new T.SphereGeometry(size*1.18,16,16),new T.MeshBasicMaterial({color:ac,transparent:true,opacity:.07,side:T.BackSide,blending:T.AdditiveBlending,depthWrite:false})));
+      if(i===playerIdx){
+        const rMesh=new T.Mesh(new T.RingGeometry(size*1.7,size*2.2,32),new T.MeshBasicMaterial({color:0xffd700,transparent:true,opacity:.85,side:T.DoubleSide}));
+        rMesh.rotation.x=Math.PI/2;mesh.add(rMesh);
+      }else if(myColonyIndices&&myColonyIndices.indexOf(i)>=0){
+        // Cyan ring for my colonies (distinct from golden natal ring)
+        const rMesh=new T.Mesh(new T.RingGeometry(size*1.7,size*2.2,32),new T.MeshBasicMaterial({color:0x66bbff,transparent:true,opacity:.75,side:T.DoubleSide}));
+        rMesh.rotation.x=Math.PI/2;mesh.add(rMesh);
+      }
+      const lCv=document.createElement("canvas");lCv.width=256;lCv.height=56;
+      const isMyCol=myColonyIndices&&myColonyIndices.indexOf(i)>=0;
+      const lCtx=lCv.getContext("2d");lCtx.fillStyle=i===playerIdx?"rgba(255,215,0,.95)":isMyCol?"rgba(120,200,255,.95)":p.isWild?"rgba(220,235,255,.7)":"rgba(160,200,240,.9)";
+      lCtx.font=(p.isWild&&!isMyCol?"":"bold ")+"18px monospace";lCtx.textAlign="center";lCtx.fillText(p.name,128,38);
+      const lMat=new T.SpriteMaterial({map:new T.CanvasTexture(lCv),transparent:true,opacity:0,depthTest:false});
+      const sprite=new T.Sprite(lMat);sprite.scale.set(1.8,.4,1);sprite.position.set(0,size+.32,0);mesh.add(sprite);
+      planetMeshes.push({mesh,planet:p,size,labelMat:lMat});
+    });
+    stateRef.current={renderer,scene,cam,planetMeshes};
+    const raycaster=new T.Raycaster();
+    const oD=e=>{
+      const cd=camDrag.current;
+      if(e.touches&&e.touches.length===2){
+        // Pinch + two-finger pan start
+        const dx=e.touches[0].clientX-e.touches[1].clientX;
+        const dy=e.touches[0].clientY-e.touches[1].clientY;
+        cd.pinchDist=Math.sqrt(dx*dx+dy*dy);
+        cd.pinchCx=(e.touches[0].clientX+e.touches[1].clientX)/2;
+        cd.pinchCy=(e.touches[0].clientY+e.touches[1].clientY)/2;
+        cd.on=false;
+        cd.pMoved=true; // mark that a multi-touch happened so single tap won't fire click
+        return;
+      }
+      cd.on=true;cd.moved=false;cd.startedHere=true;cd.panMode=!!(e.shiftKey||e.button===2||e.ctrlKey);
+      cd.x=e.clientX||(e.touches&&e.touches[0]&&e.touches[0].clientX||0);
+      cd.y=e.clientY||(e.touches&&e.touches[0]&&e.touches[0].clientY||0);
+      cd.vTheta=0;cd.vPhi=0;
+    };
+    const oM=e=>{
+      const cd=camDrag.current;
+      // Two-finger: pinch zoom + pan target
+      if(e.touches&&e.touches.length===2){
+        const dx=e.touches[0].clientX-e.touches[1].clientX;
+        const dy=e.touches[0].clientY-e.touches[1].clientY;
+        const dist=Math.sqrt(dx*dx+dy*dy);
+        const cx=(e.touches[0].clientX+e.touches[1].clientX)/2;
+        const cy=(e.touches[0].clientY+e.touches[1].clientY)/2;
+        if(cd.pinchDist){
+          const delta=cd.pinchDist-dist;
+          // Only treat as zoom if distance change is significant (>2.5px per frame).
+          // Small parallel two-finger movement should pan, not zoom.
+          if(Math.abs(delta)>2.5){
+            cd.dist=Math.max(3,Math.min(80,cd.dist+(delta-Math.sign(delta)*2.5)*.06));
+          }
+        }
+        // Two-finger pan: move target along camera's horizontal/vertical plane
+        if(cd.pinchCx!=null){
+          const mx=cx-cd.pinchCx,my=cy-cd.pinchCy;
+          const panScale=cd.dist*0.0025;
+          // Camera's right and up vectors for proper screen-aligned panning
+          const rightX=Math.cos(cd.theta-Math.PI/2),rightZ=Math.sin(cd.theta-Math.PI/2);
+          cd.tx-=mx*panScale*rightX;
+          cd.tz-=mx*panScale*rightZ;
+          cd.ty+=my*panScale;
+          // Clamp target to reasonable galaxy bounds
+          cd.tx=Math.max(-60,Math.min(60,cd.tx));
+          cd.ty=Math.max(-30,Math.min(30,cd.ty));
+          cd.tz=Math.max(-60,Math.min(60,cd.tz));
+        }
+        cd.pinchDist=dist;cd.pinchCx=cx;cd.pinchCy=cy;
+        return;
+      }
+      if(!cd.on)return;
+      const cx=e.clientX||(e.touches&&e.touches[0]&&e.touches[0].clientX||0);
+      const cy=e.clientY||(e.touches&&e.touches[0]&&e.touches[0].clientY||0);
+      if(Math.abs(cx-cd.x)>2||Math.abs(cy-cd.y)>2)cd.moved=true;
+      if(cd.panMode){
+        // Desktop: shift/right-click drag pans the target
+        const mx=cx-cd.x,my=cy-cd.y;
+        const panScale=cd.dist*0.003;
+        const rightX=Math.cos(cd.theta-Math.PI/2),rightZ=Math.sin(cd.theta-Math.PI/2);
+        cd.tx-=mx*panScale*rightX;
+        cd.tz-=mx*panScale*rightZ;
+        cd.ty+=my*panScale;
+        cd.tx=Math.max(-60,Math.min(60,cd.tx));
+        cd.ty=Math.max(-30,Math.min(30,cd.ty));
+        cd.tz=Math.max(-60,Math.min(60,cd.tz));
+      }else{
+        cd.vTheta=(cx-cd.x)*.008;cd.vPhi=(cy-cd.y)*.006;
+        cd.theta+=cd.vTheta;cd.phi+=cd.vPhi;
+      }
+      cd.x=cx;cd.y=cy;
+    };
+    const oU=e=>{
+      const cd=camDrag.current;
+      // Reset multi-touch state when fingers lift
+      cd.pinchDist=null;cd.pinchCx=null;cd.pinchCy=null;
+      const wasPan=cd.panMode;
+      cd.on=false;cd.panMode=false;
+      // Block click after multi-touch — small delay to avoid stray clicks
+      if(cd.pMoved){setTimeout(()=>{cd.pMoved=false;},100);return;}
+      if(!cd.moved&&cd.startedHere&&!wasPan){
+        const rect=renderer.domElement.getBoundingClientRect();
+        const mx=((e.clientX-rect.left)/rect.width)*2-1,my=-((e.clientY-rect.top)/rect.height)*2+1;
+        raycaster.setFromCamera({x:mx,y:my},cam);
+        const hits=raycaster.intersectObjects(planetMeshes.map(pm=>pm.mesh),false);
+        if(hits.length>0){
+          const idx2=planetMeshes.findIndex(pm=>pm.mesh===hits[0].object);
+          if(idx2>=0){
+            // Trigger cinematic zoom before selection
+            try{if(AudioEngine&&AudioEngine.safeSoftClick)AudioEngine.safeSoftClick();}catch(e){}
+            zoomTarget.active=true;
+            zoomTarget.startDist=cd.dist;
+            zoomTarget.t=0;
+            setTimeout(()=>onSelect(idx2),280);
+          }
+        }
+      }
+      cd.startedHere=false;
+    };
+    const onWheel=e=>{const cd=camDrag.current;cd.dist=Math.max(3,Math.min(80,cd.dist+e.deltaY*.025));};
+    const onContextMenu=e=>e.preventDefault();
+    renderer.domElement.addEventListener("contextmenu",onContextMenu);
+    renderer.domElement.addEventListener("mousedown",oD);renderer.domElement.addEventListener("touchstart",oD,{passive:false});
+    window.addEventListener("mousemove",oM);window.addEventListener("touchmove",oM,{passive:false});
+    window.addEventListener("mouseup",oU);window.addEventListener("touchend",oU);
+    renderer.domElement.addEventListener("wheel",onWheel,{passive:true});
+    // Prevent browser zoom interfering with our pinch
+    renderer.domElement.style.touchAction="none";
+    const ro=new ResizeObserver(()=>{const W2=div.clientWidth||window.innerWidth,H2=div.clientHeight||window.innerHeight;renderer.setSize(W2,H2);cam.aspect=W2/H2;cam.updateProjectionMatrix();});
+    ro.observe(div);
+    window.addEventListener("orientationchange",()=>setTimeout(()=>{const W2=div.clientWidth,H2=div.clientHeight;if(W2&&H2){renderer.setSize(W2,H2);cam.aspect=W2/H2;cam.updateProjectionMatrix();}},150));
+    let t=0,af,idleTime=0,lastInteract=Date.now();
+    const cinematicRef={enabled:true};
+    // Track user interaction to toggle cinematic mode
+    const markInteract=()=>{lastInteract=Date.now();};
+    renderer.domElement.addEventListener("mousedown",markInteract);
+    renderer.domElement.addEventListener("touchstart",markInteract);
+    renderer.domElement.addEventListener("wheel",markInteract);
+    const loop=()=>{
+      af=requestAnimationFrame(loop);t+=.003;
+      const cd=camDrag.current;
+      if(!cd.on){cd.vTheta*=.92;cd.vPhi*=.92;cd.theta+=cd.vTheta;cd.phi+=cd.vPhi;}
+      // Cinematic auto-rotation when user is idle for 3+ seconds
+      const idle=(Date.now()-lastInteract)/1000;
+      if(idle>3&&!cd.on){
+        const fade=Math.min(1,(idle-3)/2);
+        cd.theta+=0.0008*fade;
+        cd.phi+=Math.sin(t*0.3)*0.0003*fade;
+      }
+      // Wrap phi modulo 2π for unrestricted vertical rotation (same trick as planet hub)
+      const wPhi=((cd.phi%(Math.PI*2))+Math.PI*2)%(Math.PI*2);
+      const cx2=cd.dist*Math.sin(wPhi)*Math.cos(cd.theta)+cd.tx;
+      const cy2=cd.dist*Math.cos(wPhi)+cd.ty;
+      const cz2=cd.dist*Math.sin(wPhi)*Math.sin(cd.theta)+cd.tz;
+      cam.position.set(cx2,cy2,cz2);
+      // Flip camera "up" when in inverted hemisphere to prevent mirror/jitter at poles
+      cam.up.set(0,wPhi<Math.PI?1:-1,0);
+      cam.lookAt(cd.tx,cd.ty,cd.tz);
+      // Nebula rotation — two layers in opposite directions for parallax
+      nebMesh.rotation.y=t*.015;
+      nebMesh2.rotation.y=-t*.008;
+      nebMesh2.rotation.x=t*.004;
+      // Twinkle regular stars subtly
+      starLayers.forEach(l=>{
+        l.mat.opacity=l.baseOp*(0.85+0.15*Math.sin(t*l.freq+l.phase));
+      });
+      // Bright stars scintillate more dramatically
+      const bsSizes=bsGeo.attributes.position;
+      bsMat.opacity=0.7+0.3*Math.sin(t*2);
+      // Drift dust particles slowly
+      const dpos=dustGeo.attributes.position.array;
+      for(let i=0;i<dustCount;i++){
+        dpos[i*3]+=dustVel[i].vx;
+        dpos[i*3+1]+=dustVel[i].vy;
+        dpos[i*3+2]+=dustVel[i].vz;
+        // Wrap around in a bubble near camera
+        for(let k=0;k<3;k++){
+          if(dpos[i*3+k]>30)dpos[i*3+k]=-30;
+          if(dpos[i*3+k]<-30)dpos[i*3+k]=30;
+        }
+      }
+      dustGeo.attributes.position.needsUpdate=true;
+      // Comet spawning
+      nextCometAt-=0.016;
+      if(nextCometAt<=0){
+        makeComet();
+        nextCometAt=4+Math.random()*10;
+      }
+      // Ship spawning — more frequent than comets, gives "life" to galaxy
+      nextShipAt-=0.016;
+      if(nextShipAt<=0&&ships.length<5){
+        makeShip();
+        nextShipAt=3+Math.random()*5;
+      }
+      // Animate ships
+      for(let si=ships.length-1;si>=0;si--){
+        const sh=ships[si];
+        sh.progress+=sh.speed;
+        if(sh.progress>=1){
+          scene.remove(sh.group);
+          scene.remove(sh.trailLine);
+          sh.trailGeo.dispose();
+          ships.splice(si,1);
+          continue;
+        }
+        // Linear trajectory with slight arc
+        const px=sh.start.x+(sh.end.x-sh.start.x)*sh.progress;
+        const py=sh.start.y+(sh.end.y-sh.start.y)*sh.progress+Math.sin(sh.progress*Math.PI)*1.5;
+        const pz=sh.start.z+(sh.end.z-sh.start.z)*sh.progress;
+        sh.group.position.set(px,py,pz);
+        // Orient ship toward movement direction
+        const npx=sh.start.x+(sh.end.x-sh.start.x)*Math.min(1,sh.progress+0.01);
+        const npz=sh.start.z+(sh.end.z-sh.start.z)*Math.min(1,sh.progress+0.01);
+        sh.group.lookAt(npx,py,npz);
+        // Trail follows
+        const tp=sh.trailGeo.attributes.position.array;
+        for(let j=sh.trailLen-1;j>0;j--){
+          tp[j*3]=tp[(j-1)*3];tp[j*3+1]=tp[(j-1)*3+1];tp[j*3+2]=tp[(j-1)*3+2];
+        }
+        tp[0]=px;tp[1]=py;tp[2]=pz;
+        sh.trailGeo.attributes.position.needsUpdate=true;
+        // Engine glow flicker
+        sh.engGlow.material.opacity=0.7+Math.random()*0.3;
+        // Fade in/out
+        const fade=sh.progress<0.05?sh.progress/0.05:sh.progress>0.95?(1-sh.progress)/0.05:1;
+        sh.body.material.opacity=fade;
+        sh.body.material.transparent=true;
+        sh.trailLine.material.opacity=0.5*fade;
+      }
+      // Cinematic zoom animation
+      if(zoomTarget.active){
+        zoomTarget.t+=0.025;
+        const z=Math.min(1,zoomTarget.t);
+        const eased=z<0.5?2*z*z:1-Math.pow(-2*z+2,2)/2;
+        cd.dist=zoomTarget.startDist+(6-zoomTarget.startDist)*eased*0.5;
+        if(z>=1){zoomTarget.active=false;cd.dist=zoomTarget.startDist;}
+      }
+      // Animate comets
+      for(let ci=comets.length-1;ci>=0;ci--){
+        const co=comets[ci];
+        co.progress+=co.speed;
+        if(co.progress>=1){
+          scene.remove(co.trailLine);
+          scene.remove(co.head);
+          co.trail.dispose();
+          comets.splice(ci,1);
+          continue;
+        }
+        // Arc through the scene — curved path
+        const px=co.start.x+(co.end.x-co.start.x)*co.progress;
+        const py=co.start.y+(co.end.y-co.start.y)*co.progress+Math.sin(co.progress*Math.PI)*15;
+        const pz=co.start.z+(co.end.z-co.start.z)*co.progress;
+        co.head.position.set(px,py,pz);
+        // Shift trail positions
+        const tp=co.trail.attributes.position.array;
+        for(let j=co.trailLen-1;j>0;j--){
+          tp[j*3]=tp[(j-1)*3];
+          tp[j*3+1]=tp[(j-1)*3+1];
+          tp[j*3+2]=tp[(j-1)*3+2];
+        }
+        tp[0]=px;tp[1]=py;tp[2]=pz;
+        co.trail.attributes.position.needsUpdate=true;
+        // Fade in/out
+        const fade=co.progress<0.1?co.progress/0.1:co.progress>0.9?(1-co.progress)/0.1:1;
+        co.head.material.opacity=fade;
+        co.trailLine.material.opacity=0.7*fade;
+      }
+      planetMeshes.forEach(({mesh,planet:p,size,labelMat})=>{
+        const pos=orbitPos(p,t);mesh.position.set(pos.x,pos.y,pos.z);mesh.rotation.y=t*.4+p.orbitAngle3d;
+        const dist=cam.position.distanceTo(mesh.position);labelMat.opacity=dist<14?Math.min(1,(14-dist)/5):0;
+      });
+      const pulse=.97+Math.sin(t*1.2)*.03;sunMesh.scale.setScalar(pulse);flare.material.opacity=.3+Math.sin(t*1.5)*.06;
+      renderer.render(scene,cam);
+    };
+    loop();stateRef.current.af=af;
+    return()=>{
+      cancelAnimationFrame(stateRef.current.af);ro.disconnect();
+      renderer.domElement.removeEventListener("mousedown",oD);renderer.domElement.removeEventListener("touchstart",oD);
+      renderer.domElement.removeEventListener("mousedown",markInteract);renderer.domElement.removeEventListener("touchstart",markInteract);renderer.domElement.removeEventListener("wheel",markInteract);
+      window.removeEventListener("mousemove",oM);window.removeEventListener("touchmove",oM);
+      window.removeEventListener("mouseup",oU);window.removeEventListener("touchend",oU);
+      renderer.domElement.removeEventListener("wheel",onWheel);
+      renderer.domElement.removeEventListener("contextmenu",onContextMenu);
+      try{renderer.forceContextLoss&&renderer.forceContextLoss();}catch(e){}
+      renderer.dispose();while(div.firstChild)div.removeChild(div.firstChild);
+    };
+  },[planets,playerIdx,gSeed,myColonyIndices&&myColonyIndices.join(",")]);
+  const recenter=()=>{
+    const cd=camDrag.current;
+    // Smoothly snap target back to origin
+    cd.tx=0;cd.ty=0;cd.tz=0;cd.dist=28;
+  };
+  return <div style={{width:"100%",height:"100%",position:"relative"}}>
+    <div ref={mountRef} style={{width:"100%",height:"100%",cursor:"grab"}}/>
+    <button onClick={recenter} style={{position:"absolute",bottom:12,left:12,padding:"5px 10px",background:"rgba(8,14,24,0.85)",border:"1px solid #1a3050",borderRadius:6,color:"#9abcd8",fontSize:10,cursor:"pointer",zIndex:5,backdropFilter:"blur(4px)",fontFamily:"monospace"}}>☀ RECENTRER</button>
+  </div>;
+}
+
+
+// ─────────────────────────────────────────────────────────────────
+// ExplorationMode — first-person space sim prototype
+// Uses Three.js with FPS camera, virtual joystick + thrust button.
+// Scaled-up version of the galaxy (×15) for sense of immensity.
+// ─────────────────────────────────────────────────────────────────
+function ExplorationMode({planets,playerIdx,gSeed,anomalies,myState,onLaunchAnomalyFleet,onClose}){
+  const mountRef=useRef();
+  const stateRef=useRef({});
+  const ctrlRef=useRef({
+    // Camera state
+    yaw:0,pitch:0,
+    // Movement state
+    velocity:null,    // THREE.Vector3, set after THREE loads
+    targetThrust:0,   // 0 to 1
+    currentThrust:0,
+    // Joystick state
+    joyActive:false,joyX:0,joyY:0,joyCenterX:0,joyCenterY:0,joyRadius:0,joyTouchId:null,
+    // Thrust button state
+    thrustActive:false,thrustTouchId:null,
+    // Brake button state
+    brakeActive:false,brakeTouchId:null,
+    // HUD
+    speed:0,nearestPlanet:null,nearestDist:0
+  });
+  const [hud,setHud]=useState({speed:0,nearest:"",dist:0,anomNear:null,anomDist:0,radarAngle:0,radarTotal:0,radarVertical:0});
+  const [radarOn,setRadarOn]=useState(true);
+  const [analyzeModal,setAnalyzeModal]=useState(null); // null or {anomaly}
+
+  useEffect(()=>{
+    if(!window.THREE||!planets||!mountRef.current)return;
+    const T=window.THREE,div=mountRef.current;
+    const W=div.clientWidth||window.innerWidth,H=div.clientHeight||window.innerHeight;
+
+    // Renderer
+    const renderer=new T.WebGLRenderer({antialias:true,alpha:false});
+    renderer.setSize(W,H);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
+    renderer.setClearColor(0x000005,1);
+    div.appendChild(renderer.domElement);
+
+    // Scene + camera
+    const scene=new T.Scene();
+    const cam=new T.PerspectiveCamera(75,W/H,0.5,5000);
+    ctrlRef.current.velocity=new T.Vector3(0,0,0);
+
+    // ── World scale: ×15 vs galaxy view ──
+    const SCALE=15;
+
+    // Far nebula sphere (reuse generator)
+    const nebTex=new T.CanvasTexture(genNebulaTexture(gSeed,1024));
+    const nebMesh=new T.Mesh(
+      new T.SphereGeometry(2500,32,32),
+      new T.MeshBasicMaterial({map:nebTex,side:T.BackSide,transparent:true,opacity:0.85,depthWrite:false})
+    );
+    scene.add(nebMesh);
+    const nebTex2=new T.CanvasTexture(genNebulaTexture(gSeed+31337,1024));
+    const nebMesh2=new T.Mesh(
+      new T.SphereGeometry(2200,32,32),
+      new T.MeshBasicMaterial({map:nebTex2,side:T.BackSide,transparent:true,opacity:0.45,depthWrite:false,blending:T.AdditiveBlending})
+    );
+    scene.add(nebMesh2);
+
+    // Soft circular star texture (avoid pixel-square rendering)
+    const starCv=document.createElement("canvas");starCv.width=starCv.height=32;
+    const sCtx=starCv.getContext("2d");
+    const sGr=sCtx.createRadialGradient(16,16,0,16,16,16);
+    sGr.addColorStop(0,"rgba(255,255,255,1)");
+    sGr.addColorStop(0.5,"rgba(255,255,255,0.5)");
+    sGr.addColorStop(1,"rgba(255,255,255,0)");
+    sCtx.fillStyle=sGr;sCtx.fillRect(0,0,32,32);
+    const starTex=new T.CanvasTexture(starCv);
+
+    // Star layers — far background, smaller pixel sizes
+    const starLayers=[];
+    [[6000,800,2000,2.0,0.85,0xffffff],[3500,600,1500,1.6,0.6,0xddeeff],[1800,400,900,1.2,0.4,0xaaccff]].forEach(d=>{
+      const cnt=d[0],mn=d[1],mx=d[2],sz=d[3],op=d[4],col=d[5];
+      const sp=new Float32Array(cnt*3);
+      for(let i=0;i<cnt*3;i+=3){
+        const a=Math.random()*Math.PI*2,b=Math.acos(2*Math.random()-1),r=mn+Math.random()*(mx-mn);
+        sp[i]=r*Math.sin(b)*Math.cos(a);sp[i+1]=r*Math.sin(b)*Math.sin(a);sp[i+2]=r*Math.cos(b);
+      }
+      const sg=new T.BufferGeometry();sg.setAttribute("position",new T.BufferAttribute(sp,3));
+      const mat=new T.PointsMaterial({map:starTex,color:col,size:sz,transparent:true,opacity:op,sizeAttenuation:false,depthWrite:false,blending:T.AdditiveBlending,alphaTest:0.01});
+      const pts=new T.Points(sg,mat);
+      scene.add(pts);
+      starLayers.push({pts,mat,baseOp:op});
+    });
+
+    // ── Parallax dust — close to camera, gives sense of motion ──
+    // Use a soft circular sprite texture (avoid square pixel rendering on mobile)
+    const dustCv=document.createElement("canvas");dustCv.width=dustCv.height=32;
+    const dCtx=dustCv.getContext("2d");
+    const dGr=dCtx.createRadialGradient(16,16,0,16,16,16);
+    dGr.addColorStop(0,"rgba(255,255,255,0.9)");
+    dGr.addColorStop(0.4,"rgba(180,210,240,0.35)");
+    dGr.addColorStop(1,"rgba(180,210,240,0)");
+    dCtx.fillStyle=dGr;dCtx.fillRect(0,0,32,32);
+    const dustTex=new T.CanvasTexture(dustCv);
+
+    const dustCount=400;
+    const dustPts=new Float32Array(dustCount*3);
+    const DUST_RADIUS=120;
+    const DUST_INNER=20; // never spawn dust closer than this
+    for(let i=0;i<dustCount;i++){
+      // Random position in spherical shell (avoid clustering at center)
+      const a=Math.random()*Math.PI*2,b=Math.acos(2*Math.random()-1);
+      const r=DUST_INNER+Math.random()*(DUST_RADIUS-DUST_INNER);
+      dustPts[i*3]=r*Math.sin(b)*Math.cos(a);
+      dustPts[i*3+1]=r*Math.sin(b)*Math.sin(a);
+      dustPts[i*3+2]=r*Math.cos(b);
+    }
+    const dustGeo=new T.BufferGeometry();
+    dustGeo.setAttribute("position",new T.BufferAttribute(dustPts,3));
+    const dustMat=new T.PointsMaterial({
+      map:dustTex,
+      color:0xaaccdd,
+      size:0.6,
+      transparent:true,
+      opacity:0.35,
+      blending:T.AdditiveBlending,
+      depthWrite:false,
+      alphaTest:0.01
+    });
+    const dust=new T.Points(dustGeo,dustMat);
+    scene.add(dust);
+
+    // ── Sun at center, scaled up ──
+    [[24,.18,0xfff0b0],[33,.08,0xffdd70],[48,.04,0xffb040],[75,.015,0xff7020]].forEach(d=>{
+      scene.add(new T.Mesh(
+        new T.SphereGeometry(d[0],24,24),
+        new T.MeshBasicMaterial({color:d[2],transparent:true,opacity:d[1],side:T.BackSide,blending:T.AdditiveBlending,depthWrite:false})
+      ));
+    });
+    scene.add(new T.PointLight(0xfff5e0,2.2,1200));
+    scene.add(new T.AmbientLight(0x080a14,1.0));
+
+    // ── Planets — scaled positions + sized for visibility ──
+    const planetMeshes=[];
+    let myPlanetPos=null;
+    planets.forEach((p,i)=>{
+      // Compute position from orbit data (keep planets at roughly current angle)
+      const a=(p.orbitAngle3d||0);
+      const lx=Math.cos(a)*p.orbitRadius3d,lz=Math.sin(a)*p.orbitRadius3d;
+      const yi=lz*Math.sin(p.orbitInc||0),zi=lz*Math.cos(p.orbitInc||0);
+      const x=(lx*Math.cos(p.orbitAsc||0)-zi*Math.sin(p.orbitAsc||0))*SCALE;
+      const z=(lx*Math.sin(p.orbitAsc||0)+zi*Math.cos(p.orbitAsc||0))*SCALE;
+      const y=yi*SCALE;
+
+      // Size: bigger than galaxy view so visible up close, but still small in immensity
+      const size=(0.14+(p.size/15000)*0.24)*1.7*(p.isWild?0.75:1)*4;
+
+      const tex=new T.CanvasTexture(genMiniTexture(p,128));tex.anisotropy=2;
+      const mat=p.isWild
+        ?new T.MeshPhongMaterial({map:tex,bumpMap:tex,bumpScale:.01,shininess:10,transparent:true,opacity:0.65,emissive:new T.Color(0.15,0.18,0.25),emissiveIntensity:0.4})
+        :new T.MeshPhongMaterial({map:tex,bumpMap:tex,bumpScale:.015,shininess:p.water>20?20:5});
+      const mesh=new T.Mesh(new T.SphereGeometry(size,24,24),mat);
+      mesh.position.set(x,y,z);
+      scene.add(mesh);
+
+      // Atmosphere halo
+      const atmCol=({Dense:new T.Color(.28,.52,1),Legere:new T.Color(.35,.6,1),Toxique:new T.Color(.55,.85,.2),Respirable:new T.Color(.25,.55,1),Tempetueuse:new T.Color(.6,.45,.85)})[p.atmos];
+      if(atmCol){
+        const halo=new T.Mesh(new T.SphereGeometry(size*1.18,16,16),new T.MeshBasicMaterial({color:atmCol,transparent:true,opacity:.07,side:T.BackSide,blending:T.AdditiveBlending,depthWrite:false}));
+        mesh.add(halo);
+      }
+      // Player ring
+      if(i===playerIdx){
+        const rMesh=new T.Mesh(new T.RingGeometry(size*1.7,size*2.2,32),new T.MeshBasicMaterial({color:0xffd700,transparent:true,opacity:.85,side:T.DoubleSide}));
+        rMesh.rotation.x=Math.PI/2;mesh.add(rMesh);
+        myPlanetPos=new T.Vector3(x,y,z);
+      }
+
+      planetMeshes.push({mesh,planet:p,pos:new T.Vector3(x,y,z),size});
+    });
+
+    // ── Anomalies — created at their pos*SCALE, start invisible (faded in by detection radius) ──
+    var anomMeshes=[];
+    var anomList=anomalies||[];
+    for(var ai=0;ai<anomList.length;ai++){
+      var a=anomList[ai];
+      var ax=a.pos.x*SCALE, ay=a.pos.y*SCALE, az=a.pos.z*SCALE;
+      // Pick color from ANOMALY_TYPES
+      var atype=ANOMALY_TYPES[a.type]||ANOMALY_TYPES.asteroids;
+      var col=new T.Color(atype.color[0]/255, atype.color[1]/255, atype.color[2]/255);
+      var glowCol=new T.Color(atype.glowColor[0]/255, atype.glowColor[1]/255, atype.glowColor[2]/255);
+      // Smaller than planets — base size ~1.5 to 2 units (planets are ~1.7-3)
+      var anomSize=1.4+a.intensity*0.6;
+      // Container group for the anomaly + halo + rotation
+      var grp=new T.Group();
+      grp.position.set(ax,ay,az);
+      // Main body — varies by type
+      var body;
+      if(a.type==="asteroids"){
+        // Cluster of small rocks
+        body=new T.Group();
+        for(var ri=0;ri<7;ri++){
+          var rsize=anomSize*(0.25+Math.random()*0.35);
+          var rmesh=new T.Mesh(new T.IcosahedronGeometry(rsize,0),new T.MeshPhongMaterial({color:col,flatShading:true,shininess:5}));
+          var rang=ri*(Math.PI*2/7);
+          rmesh.position.set(Math.cos(rang)*anomSize*0.7, (Math.random()-0.5)*anomSize*0.5, Math.sin(rang)*anomSize*0.7);
+          body.add(rmesh);
+        }
+      } else if(a.type==="gascloud"){
+        // Translucent green-cyan sphere with internal glow
+        body=new T.Mesh(new T.SphereGeometry(anomSize*1.1,16,16),new T.MeshBasicMaterial({color:col,transparent:true,opacity:0.45,blending:T.AdditiveBlending,depthWrite:false}));
+      } else if(a.type==="wreck"){
+        // Angular metallic shape — boxes assembled
+        body=new T.Group();
+        var b1=new T.Mesh(new T.BoxGeometry(anomSize*1.4,anomSize*0.4,anomSize*0.5),new T.MeshPhongMaterial({color:col,shininess:30}));
+        var b2=new T.Mesh(new T.BoxGeometry(anomSize*0.5,anomSize*0.8,anomSize*0.4),new T.MeshPhongMaterial({color:col,shininess:30}));
+        b2.position.set(anomSize*0.4,anomSize*0.5,0);
+        body.add(b1);body.add(b2);
+        body.rotation.set(0.3,0.7,0.2);
+      } else {
+        // Storm — pulsating glow sphere
+        body=new T.Mesh(new T.SphereGeometry(anomSize*0.8,16,16),new T.MeshBasicMaterial({color:col,transparent:true,opacity:0.7,blending:T.AdditiveBlending,depthWrite:false}));
+      }
+      grp.add(body);
+      // Outer glow halo (always present, larger and softer)
+      var halo=new T.Mesh(new T.SphereGeometry(anomSize*2.2,16,16),new T.MeshBasicMaterial({color:glowCol,transparent:true,opacity:0.15,side:T.BackSide,blending:T.AdditiveBlending,depthWrite:false}));
+      grp.add(halo);
+      // Start fully invisible
+      grp.traverse(function(child){
+        if(child.material){
+          child.userData.baseOpacity=child.material.opacity!==undefined?child.material.opacity:1;
+          child.material.transparent=true;
+          child.material.opacity=0;
+        }
+      });
+      grp.visible=false;
+      scene.add(grp);
+      anomMeshes.push({grp:grp,body:body,halo:halo,anom:a,pos:new T.Vector3(ax,ay,az),size:anomSize,visAmount:0});
+    }
+
+    // ── Initial camera placement: start near the player's natal planet, looking inward ──
+    if(myPlanetPos){
+      // Position camera offset from natal planet, looking toward galaxy center
+      const offset=new T.Vector3(8,3,8);
+      cam.position.copy(myPlanetPos).add(offset);
+      const lookTarget=new T.Vector3(0,0,0);
+      cam.lookAt(lookTarget);
+      // Initialize yaw/pitch from camera orientation
+      const dir=new T.Vector3();cam.getWorldDirection(dir);
+      ctrlRef.current.yaw=Math.atan2(-dir.x,-dir.z);
+      ctrlRef.current.pitch=Math.asin(dir.y);
+    }else{
+      cam.position.set(40,8,40);
+      cam.lookAt(0,0,0);
+    }
+
+    // ── Animation loop ──
+    let af=0,lastT=performance.now(),hudT=0;
+    const tmpVec=new T.Vector3();
+    const fwdVec=new T.Vector3();
+    const animate=()=>{
+      const now=performance.now();
+      const dt=Math.min(0.1,(now-lastT)/1000);
+      lastT=now;
+      const c=ctrlRef.current;
+
+      // ── Apply yaw/pitch from joystick to camera quaternion ──
+      // Joystick X → yaw rotation rate
+      // Joystick Y → pitch rotation rate
+      const yawSpeed=1.6;   // rad/sec at full deflection
+      const pitchSpeed=1.2;
+      if(c.joyActive){
+        c.yaw-=c.joyX*yawSpeed*dt;
+        c.pitch-=c.joyY*pitchSpeed*dt;
+        // No clamp — full vertical freedom (like planet hub).
+      }
+      // Apply yaw/pitch to camera (Euler order YXZ)
+      const e=new T.Euler(c.pitch,c.yaw,0,"YXZ");
+      cam.quaternion.setFromEuler(e);
+
+      // ── Thrust + velocity ──
+      const targetThrust=c.thrustActive?1:(c.brakeActive?-0.5:0);
+      // Smooth thrust ramp
+      const accelRate=2.2; // how fast thrust ramps
+      c.currentThrust+=(targetThrust-c.currentThrust)*Math.min(1,accelRate*dt);
+
+      // Get camera forward direction
+      cam.getWorldDirection(fwdVec);
+      const MAX_SPEED=22;       // units/sec at full thrust
+      const ACCEL=18;           // velocity change rate
+      const DRAG=0.6;           // damping per second when no thrust
+      // Apply thrust as acceleration along forward
+      tmpVec.copy(fwdVec).multiplyScalar(c.currentThrust*ACCEL*dt);
+      c.velocity.add(tmpVec);
+      // Apply drag (always; gentle space friction so velocity decays)
+      c.velocity.multiplyScalar(Math.max(0,1-DRAG*dt));
+      // Clamp speed
+      const sp=c.velocity.length();
+      if(sp>MAX_SPEED)c.velocity.multiplyScalar(MAX_SPEED/sp);
+      c.speed=sp;
+      // Apply velocity
+      cam.position.addScaledVector(c.velocity,dt);
+
+      // ── Recycle dust around camera so it always feels populated ──
+      // When particles drift out of bubble, respawn them in shell around camera
+      const dustPos=dust.geometry.attributes.position.array;
+      const cx=cam.position.x,cy=cam.position.y,cz=cam.position.z;
+      const R2=DUST_RADIUS*DUST_RADIUS;
+      const RI2=DUST_INNER*DUST_INNER;
+      for(let i=0;i<dustCount;i++){
+        const ix=i*3;
+        const dx=dustPos[ix]-cx,dy=dustPos[ix+1]-cy,dz=dustPos[ix+2]-cz;
+        const d2=dx*dx+dy*dy+dz*dz;
+        if(d2>R2||d2<RI2){
+          // Respawn in spherical shell around camera
+          const a=Math.random()*Math.PI*2,b=Math.acos(2*Math.random()-1);
+          const r=DUST_INNER+Math.random()*(DUST_RADIUS-DUST_INNER);
+          dustPos[ix]=cx+r*Math.sin(b)*Math.cos(a);
+          dustPos[ix+1]=cy+r*Math.sin(b)*Math.sin(a);
+          dustPos[ix+2]=cz+r*Math.cos(b);
+        }
+      }
+      dust.geometry.attributes.position.needsUpdate=true;
+
+      // Keep nebula centered on camera (illusion of infinite background)
+      nebMesh.position.copy(cam.position);
+      nebMesh2.position.copy(cam.position);
+      // Rotate nebula slowly for ambient feel
+      nebMesh.rotation.y+=dt*0.005;
+      nebMesh2.rotation.y-=dt*0.003;
+
+      // ── HUD: track nearest planet ──
+      // Anomaly detection: progressive fade-in within 18 unit radius
+      var DETECT_R=35;
+      for(var aii=0;aii<anomMeshes.length;aii++){
+        var am=anomMeshes[aii];
+        var ad=cam.position.distanceTo(am.pos);
+        // Target visibility: 0 outside radius, 1 inside (with smooth ramp at edge)
+        var target=0;
+        if(ad<DETECT_R){
+          target=Math.min(1,(DETECT_R-ad)/4);
+          if(target<0)target=0;
+        }
+        // Smooth interpolation toward target
+        am.visAmount+=(target-am.visAmount)*Math.min(1,dt*2.5);
+        if(am.visAmount<0.01){
+          am.grp.visible=false;
+        } else {
+          am.grp.visible=true;
+          // Apply visibility to all child materials
+          am.grp.traverse(function(child){
+            if(child.material&&child.userData.baseOpacity!==undefined){
+              child.material.opacity=child.userData.baseOpacity*am.visAmount;
+            }
+          });
+        }
+        // Slow rotation for "alive" feel
+        am.body.rotation.y+=dt*0.15;
+        if(am.body.rotation.x!==undefined)am.body.rotation.x+=dt*0.08;
+        // Storm pulsation
+        if(am.anom.type==="storm"&&am.body.material){
+          am.body.material.opacity=am.body.userData.baseOpacity*am.visAmount*(0.7+Math.sin(performance.now()*0.003)*0.3);
+        }
+      }
+      hudT+=dt;
+      if(hudT>0.25){
+        hudT=0;
+        let bestDist=1e9,bestP=null;
+        planetMeshes.forEach(pm=>{
+          const dd=cam.position.distanceTo(pm.pos);
+          if(dd<bestDist){bestDist=dd;bestP=pm.planet;}
+        });
+        c.nearestPlanet=bestP;
+        c.nearestDist=bestDist;
+        // Find nearest anomaly within detection radius (for HUD detection text)
+        var nearAnom=null,nearAnomDist=1e9;
+        for(var aj=0;aj<anomMeshes.length;aj++){
+          var amj=anomMeshes[aj];
+          var adj=cam.position.distanceTo(amj.pos);
+          if(adj<DETECT_R&&adj<nearAnomDist){
+            nearAnomDist=adj;
+            nearAnom=amj.anom;
+          }
+        }
+        // For radar: nearest anomaly globally (no radius cap) + angle relative to camera facing
+        var radarAnom=null,radarDist=1e9;
+        for(var ak=0;ak<anomMeshes.length;ak++){
+          var amk=anomMeshes[ak];
+          var adk=cam.position.distanceTo(amk.pos);
+          if(adk<radarDist){radarDist=adk;radarAnom=amk;}
+        }
+        var radarAngleVal=0;
+        var radarVerticalVal=0; // -1 (way below) to +1 (way above), 0 = same height
+        if(radarAnom){
+          // Vector from camera to anomaly (XZ plane only — top-down compass)
+          var dx=radarAnom.pos.x-cam.position.x;
+          var dz=radarAnom.pos.z-cam.position.z;
+          var dy=radarAnom.pos.y-cam.position.y;
+          // Camera's forward yaw direction (0 = looking +Z by default)
+          var camYaw=Math.atan2(-dx,-dz)+c.yaw;
+          // Compute relative angle: atan2(dx,dz) gives world angle, subtract camera yaw
+          var worldAngle=Math.atan2(dx,-dz);
+          radarAngleVal=worldAngle-(-c.yaw);
+          // Vertical indicator: ratio dy / horizontal_dist, clamped to [-1, 1]
+          var hDist=Math.sqrt(dx*dx+dz*dz);
+          if(hDist>0.5){
+            radarVerticalVal=Math.max(-1,Math.min(1,dy/hDist));
+          } else {
+            // Very close horizontally — just sign
+            radarVerticalVal=dy>0?1:(dy<0?-1:0);
+          }
+        }
+        setHud({speed:Math.round(c.speed*10)/10,nearest:bestP?bestP.name:"",dist:Math.round(bestDist),anomNear:nearAnom,anomDist:Math.round(nearAnomDist),radarAngle:radarAngleVal,radarTotal:anomMeshes.length,radarVertical:radarVerticalVal});
+      }
+
+      renderer.render(scene,cam);
+      af=requestAnimationFrame(animate);
+    };
+    af=requestAnimationFrame(animate);
+    stateRef.current={renderer,scene,cam,af};
+
+    // ── Resize handler ──
+    const onResize=()=>{
+      const w=div.clientWidth||window.innerWidth,h=div.clientHeight||window.innerHeight;
+      renderer.setSize(w,h);
+      cam.aspect=w/h;cam.updateProjectionMatrix();
+    };
+    window.addEventListener("resize",onResize);
+
+    // ── Cleanup ──
+    return()=>{
+      cancelAnimationFrame(af);
+      window.removeEventListener("resize",onResize);
+      try{renderer.forceContextLoss&&renderer.forceContextLoss();}catch(e){}
+      renderer.dispose();
+      while(div.firstChild)div.removeChild(div.firstChild);
+    };
+  },[planets,playerIdx,gSeed]);
+
+  // ── Touch handlers for joystick ──
+  const onJoyStart=(e)=>{
+    e.preventDefault&&e.preventDefault();
+    // Use changedTouches to grab the NEW finger that just landed,
+    // not e.touches[0] which could be a finger held elsewhere (e.g. thrust button)
+    const t=e.changedTouches?e.changedTouches[0]:e;
+    const rect=e.currentTarget.getBoundingClientRect();
+    const c=ctrlRef.current;
+    c.joyCenterX=rect.left+rect.width/2;
+    c.joyCenterY=rect.top+rect.height/2;
+    c.joyRadius=rect.width/2;
+    c.joyActive=true;
+    c.joyTouchId=e.changedTouches?t.identifier:null;
+    // Apply initial position from this specific touch
+    const dx=t.clientX-c.joyCenterX,dy=t.clientY-c.joyCenterY;
+    const len=Math.sqrt(dx*dx+dy*dy);
+    const max=c.joyRadius;
+    if(len>max){c.joyX=dx/len;c.joyY=dy/len;}
+    else{c.joyX=dx/max;c.joyY=dy/max;}
+    const DZ=0.12;
+    if(Math.abs(c.joyX)<DZ)c.joyX=0;
+    if(Math.abs(c.joyY)<DZ)c.joyY=0;
+  };
+  const onJoyMove=(e)=>{
+    e.preventDefault&&e.preventDefault();
+    const c=ctrlRef.current;
+    if(!c.joyActive)return;
+    let t=null;
+    if(e.touches){
+      for(let i=0;i<e.touches.length;i++)if(e.touches[i].identifier===c.joyTouchId){t=e.touches[i];break;}
+      if(!t)return;
+    }else t=e;
+    const dx=t.clientX-c.joyCenterX,dy=t.clientY-c.joyCenterY;
+    const len=Math.sqrt(dx*dx+dy*dy);
+    const max=c.joyRadius;
+    if(len>max){c.joyX=dx/len;c.joyY=dy/len;}
+    else{c.joyX=dx/max;c.joyY=dy/max;}
+    // Dead zone
+    const DZ=0.12;
+    if(Math.abs(c.joyX)<DZ)c.joyX=0;
+    if(Math.abs(c.joyY)<DZ)c.joyY=0;
+  };
+  const onJoyEnd=(e)=>{
+    e.preventDefault&&e.preventDefault();
+    const c=ctrlRef.current;
+    // Only clear if our tracked finger is the one that lifted
+    if(e.changedTouches&&c.joyTouchId!==null){
+      let ourFingerLifted=false;
+      for(let i=0;i<e.changedTouches.length;i++){
+        if(e.changedTouches[i].identifier===c.joyTouchId){ourFingerLifted=true;break;}
+      }
+      if(!ourFingerLifted)return;
+    }
+    c.joyActive=false;c.joyX=0;c.joyY=0;c.joyTouchId=null;
+  };
+
+  // ── Touch handlers for thrust button ──
+  const onThrustStart=(e)=>{e.preventDefault&&e.preventDefault();ctrlRef.current.thrustActive=true;};
+  const onThrustEnd=(e)=>{e.preventDefault&&e.preventDefault();ctrlRef.current.thrustActive=false;};
+
+  // ── Brake (reverse) handlers ──
+  const onBrakeStart=(e)=>{e.preventDefault&&e.preventDefault();ctrlRef.current.brakeActive=true;};
+  const onBrakeEnd=(e)=>{e.preventDefault&&e.preventDefault();ctrlRef.current.brakeActive=false;};
+
+  return(
+    <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,zIndex:300,background:"#000005",overflow:"hidden",touchAction:"none"}}>
+      {/* 3D scene */}
+      <div ref={mountRef} style={{position:"absolute",top:0,left:0,width:"100%",height:"100%"}}/>
+
+      {/* Top HUD */}
+      <div style={{position:"absolute",top:"calc(10px + env(safe-area-inset-top,0px))",left:"calc(10px + env(safe-area-inset-left,0px))",right:"calc(10px + env(safe-area-inset-right,0px))",display:"flex",justifyContent:"space-between",alignItems:"flex-start",pointerEvents:"none",zIndex:5}}>
+        <button onClick={onClose} style={{padding:"8px 12px",background:"rgba(8,14,24,0.85)",border:"1px solid #1a3050",borderRadius:6,color:"#9abcd8",fontSize:11,cursor:"pointer",pointerEvents:"auto",fontFamily:"monospace",fontWeight:"bold",letterSpacing:1,backdropFilter:"blur(4px)"}}>{"← SORTIR"}</button>
+        <div style={{padding:"8px 12px",background:"rgba(8,14,24,0.85)",border:"1px solid #1a3050",borderRadius:6,color:"#9abcd8",fontSize:9,fontFamily:"monospace",letterSpacing:1,backdropFilter:"blur(4px)",textAlign:"right",lineHeight:1.5}}>
+          <div style={{color:"#7adfe8",fontWeight:"bold"}}>{"VITESSE: "+hud.speed.toFixed(1)+" U/S"}</div>
+          {hud.nearest?<div style={{color:"#9adda0",fontSize:8,marginTop:2}}>{"PROCHE: "+hud.nearest+" ("+hud.dist+"U)"}</div>:null}
+          {hud.anomNear?<div style={{color:"#d8b8ff",fontSize:8,marginTop:2,fontWeight:"bold"}}>{"\u{1F30C} ANOMALIE À "+hud.anomDist+"U"}</div>:null}
+          {hud.anomNear&&hud.anomDist<=8?<button onClick={()=>{AudioEngine.safeClick&&AudioEngine.safeClick();setAnalyzeModal({anomaly:hud.anomNear});}} style={{marginTop:6,padding:"6px 12px",background:"linear-gradient(135deg,rgba(80,50,140,0.9),rgba(50,30,90,0.9))",border:"1px solid #aa66ff",borderRadius:6,color:"#fff",fontSize:10,cursor:"pointer",pointerEvents:"auto",fontFamily:"monospace",fontWeight:"bold",letterSpacing:1,backdropFilter:"blur(4px)",boxShadow:"0 0 8px rgba(170,100,255,0.5)"}}>{"\u{1F50D} ANALYSER"}</button>:null}
+        </div>
+      </div>
+
+      {/* Crosshair */}
+      <div style={{position:"absolute",top:"50%",left:"50%",transform:"translate(-50%,-50%)",pointerEvents:"none",zIndex:4}}>
+        <div style={{width:24,height:24,border:"1px solid rgba(150,200,255,0.4)",borderRadius:"50%",position:"relative"}}>
+          <div style={{position:"absolute",top:11,left:-2,width:4,height:1,background:"rgba(150,200,255,0.6)"}}/>
+          <div style={{position:"absolute",top:11,right:-2,width:4,height:1,background:"rgba(150,200,255,0.6)"}}/>
+          <div style={{position:"absolute",left:11,top:-2,width:1,height:4,background:"rgba(150,200,255,0.6)"}}/>
+          <div style={{position:"absolute",left:11,bottom:-2,width:1,height:4,background:"rgba(150,200,255,0.6)"}}/>
+        </div>
+      </div>
+
+      {/* Radar/compass — points toward nearest anomaly. Top-center, can be toggled off. */}
+      {radarOn&&hud.radarTotal>0?(
+        <div style={{position:"absolute",top:"calc(75px + env(safe-area-inset-top,0px))",left:"50%",transform:"translateX(-50%)",pointerEvents:"none",zIndex:5}}>
+          <div style={{width:60,height:60,borderRadius:"50%",border:"1px solid rgba(180,140,220,0.5)",background:"rgba(20,15,35,0.7)",position:"relative",backdropFilter:"blur(4px)"}}>
+            <div style={{position:"absolute",top:"50%",left:"50%",transform:"translate(-50%,-50%) rotate("+(hud.radarAngle)+"rad)",width:2,height:24,background:"linear-gradient(to top,rgba(180,140,220,0.2),#d8b8ff)",transformOrigin:"center bottom",marginTop:-12}}/>
+            <div style={{position:"absolute",top:"50%",left:"50%",transform:"translate(-50%,-50%)",width:6,height:6,borderRadius:"50%",background:"#d8b8ff",boxShadow:"0 0 8px #d8b8ff"}}/>
+            {/* Vertical indicator — triangle pointing up/down based on dy */}
+            {Math.abs(hud.radarVertical)>0.05?(
+              <div style={{position:"absolute",left:"50%",transform:"translateX(-50%)",fontSize:14,color:"#d8b8ff",opacity:0.4+Math.abs(hud.radarVertical)*0.6,fontWeight:"bold",lineHeight:1,textShadow:"0 0 6px #d8b8ff",top:hud.radarVertical>0?-2:undefined,bottom:hud.radarVertical<0?-2:undefined}}>{hud.radarVertical>0?"▲":"▼"}</div>
+            ):null}
+          </div>
+          <div style={{textAlign:"center",fontSize:8,color:"#d8b8ff",fontFamily:"monospace",letterSpacing:1,marginTop:4,fontWeight:"bold"}}>{"\u{1F30C} RADAR"}</div>
+        </div>
+      ):null}
+
+      {/* Radar toggle button — top center, always available if there are anomalies */}
+      {hud.radarTotal>0?(
+        <button onClick={()=>{AudioEngine.safeClick&&AudioEngine.safeClick();setRadarOn(!radarOn);}} style={{position:"absolute",top:"calc(10px + env(safe-area-inset-top,0px))",left:"50%",transform:"translateX(-50%)",padding:"6px 10px",background:radarOn?"rgba(60,40,90,0.85)":"rgba(8,14,24,0.85)",border:"1px solid "+(radarOn?"#8866cc":"#1a3050"),borderRadius:6,color:radarOn?"#d8b8ff":"#9abcd8",fontSize:9,cursor:"pointer",pointerEvents:"auto",fontFamily:"monospace",fontWeight:"bold",letterSpacing:1,backdropFilter:"blur(4px)",zIndex:6}}>{radarOn?"\u{1F4E1} RADAR ON":"\u{1F4E1} RADAR OFF"}</button>
+      ):null}
+
+      {/* Joystick — bottom right */}
+      <div
+        onTouchStart={onJoyStart}
+        onTouchMove={onJoyMove}
+        onTouchEnd={onJoyEnd}
+        onTouchCancel={onJoyEnd}
+        onMouseDown={onJoyStart}
+        onMouseMove={(e)=>{if(ctrlRef.current.joyActive)onJoyMove(e);}}
+        onMouseUp={onJoyEnd}
+        onMouseLeave={onJoyEnd}
+        style={{
+          position:"absolute",
+          bottom:"calc(20px + env(safe-area-inset-bottom,0px))",
+          right:"calc(20px + env(safe-area-inset-right,0px))",
+          width:140,height:140,
+          borderRadius:"50%",
+          background:"radial-gradient(circle,rgba(20,40,80,0.4),rgba(8,14,24,0.65))",
+          border:"2px solid rgba(80,140,200,0.4)",
+          touchAction:"none",
+          zIndex:10,
+          backdropFilter:"blur(2px)"
+        }}>
+        {/* Inner stick visualization */}
+        <JoyStickIndicator/>
+        <div style={{position:"absolute",top:"50%",left:"50%",transform:"translate(-50%,-50%)",fontSize:8,color:"rgba(150,200,255,0.5)",fontFamily:"monospace",letterSpacing:1,pointerEvents:"none",userSelect:"none"}}>{"NAV"}</div>
+      </div>
+
+      {/* Thrust button — bottom left */}
+      <div
+        onTouchStart={onThrustStart}
+        onTouchEnd={onThrustEnd}
+        onTouchCancel={onThrustEnd}
+        onMouseDown={onThrustStart}
+        onMouseUp={onThrustEnd}
+        onMouseLeave={onThrustEnd}
+        style={{
+          position:"absolute",
+          bottom:"calc(20px + env(safe-area-inset-bottom,0px))",
+          left:"calc(20px + env(safe-area-inset-left,0px))",
+          width:90,height:90,
+          borderRadius:"50%",
+          background:"radial-gradient(circle,rgba(40,80,140,0.6),rgba(20,40,80,0.85))",
+          border:"2px solid rgba(120,180,240,0.6)",
+          display:"flex",alignItems:"center",justifyContent:"center",
+          color:"#c8e0ff",fontSize:11,fontFamily:"monospace",fontWeight:"bold",letterSpacing:1,
+          touchAction:"none",zIndex:10,
+          userSelect:"none",
+          backdropFilter:"blur(2px)"
+        }}>
+        <div style={{textAlign:"center",lineHeight:1.3,pointerEvents:"none"}}>
+          <div style={{fontSize:18}}>{"▲"}</div>
+          <div style={{fontSize:8,letterSpacing:2}}>{"PROPULSION"}</div>
+        </div>
+      </div>
+
+      {/* Brake button — small, above thrust */}
+      <div
+        onTouchStart={onBrakeStart}
+        onTouchEnd={onBrakeEnd}
+        onTouchCancel={onBrakeEnd}
+        onMouseDown={onBrakeStart}
+        onMouseUp={onBrakeEnd}
+        onMouseLeave={onBrakeEnd}
+        style={{
+          position:"absolute",
+          bottom:"calc(120px + env(safe-area-inset-bottom,0px))",
+          left:"calc(20px + env(safe-area-inset-left,0px))",
+          width:60,height:40,
+          borderRadius:8,
+          background:"rgba(60,40,40,0.7)",
+          border:"1px solid rgba(180,100,100,0.5)",
+          display:"flex",alignItems:"center",justifyContent:"center",
+          color:"#e8a0a0",fontSize:9,fontFamily:"monospace",fontWeight:"bold",letterSpacing:1,
+          touchAction:"none",zIndex:10,
+          userSelect:"none",
+          backdropFilter:"blur(2px)"
+        }}>
+        <span style={{pointerEvents:"none"}}>{"FREIN"}</span>
+      </div>
+
+      {/* Anomaly analysis modal */}
+      {analyzeModal&&analyzeModal.anomaly?(function(){
+        var anom=analyzeModal.anomaly;
+        var atype=ANOMALY_TYPES[anom.type]||ANOMALY_TYPES.asteroids;
+        var choices=ANOMALY_CHOICES[anom.type]||[];
+        var playerPlanet=planets[playerIdx];
+        return (
+          <div style={{position:"absolute",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,8,0.85)",zIndex:100,display:"flex",alignItems:"center",justifyContent:"center",pointerEvents:"auto",padding:20,backdropFilter:"blur(8px)"}} onClick={()=>setAnalyzeModal(null)}>
+            <div onClick={function(e){e.stopPropagation();}} style={{background:"linear-gradient(145deg,rgba(20,15,35,0.98),rgba(10,8,20,0.98))",border:"1px solid #6644aa",borderRadius:10,padding:18,maxWidth:520,width:"100%",maxHeight:"90vh",overflowY:"auto",fontFamily:"monospace",color:"#d8b8ff",boxShadow:"0 0 30px rgba(170,100,255,0.4)"}}>
+              <div style={{borderBottom:"1px solid #4a3070",paddingBottom:10,marginBottom:12}}>
+                <div style={{fontSize:14,fontWeight:"bold",letterSpacing:1,color:"#fff"}}>{atype.name.toUpperCase()}</div>
+                <div style={{fontSize:9,color:"#9a8ac0",marginTop:4,lineHeight:1.4}}>{atype.description}</div>
+                <div style={{fontSize:8,color:"#7a6aa0",marginTop:6,letterSpacing:1}}>{"INTENSIT\u00C9 : "+Math.round(anom.intensity*100)+"%"}</div>
+              </div>
+              <div style={{fontSize:9,color:"#aa88dd",marginBottom:8,letterSpacing:1,fontWeight:"bold"}}>{"\u{1F4CB} OPTIONS D\u2019ANALYSE"}</div>
+              {choices.map(function(c,ci){
+                var cargos=computeAnomalyCargos(anom,c);
+                var travelMs=computeAnomalyTravelMs(anom,playerPlanet,c);
+                var fuelCost=computeAnomalyFuelCost(travelMs);
+                var travelMin=Math.round(travelMs/60000);
+                // Reward preview text
+                var rewardText="";
+                if(c.rewardKind==="resources"){
+                  var r=c.rewardBase;
+                  var parts=[];
+                  if(r.metal>0)parts.push("+"+Math.round(r.metal*anom.intensity)+" metal");
+                  if(r.crystal>0)parts.push("+"+Math.round(r.crystal*anom.intensity)+" cristal");
+                  if(r.deut>0)parts.push("+"+Math.round(r.deut*anom.intensity)+" deut");
+                  rewardText=parts.join(", ");
+                } else if(c.rewardKind==="boost"){
+                  rewardText="Boost +"+c.rewardBase.percent+"% "+c.rewardBase.boostType+" "+(c.rewardBase.durationMs/3600000)+"h";
+                } else if(c.rewardKind==="tech_or_boost"){
+                  rewardText="Tech ou Boost (chance 50/50)";
+                }
+                return (
+                  <div key={c.id} style={{background:"rgba(40,25,70,0.5)",border:"1px solid "+(ci===0?"#5588cc":(ci===1?"#cc8855":"#cc55aa")),borderRadius:8,padding:10,marginBottom:8}}>
+                    <div style={{fontSize:11,fontWeight:"bold",color:"#fff",letterSpacing:0.5}}>{c.label}</div>
+                    <div style={{fontSize:8,color:"#9a8ac0",marginTop:3,lineHeight:1.3}}>{c.desc}</div>
+                    <div style={{fontSize:9,color:"#a8e0a8",marginTop:6,fontWeight:"bold"}}>{"\u{1F381} "+rewardText}</div>
+                    <div style={{display:"flex",gap:10,marginTop:5,fontSize:8,color:"#7a8aa8"}}>
+                      <span>{"\u{1F680} "+cargos+" cargo(s)"}</span>
+                      <span>{"\u{23F1} "+travelMin+" min"}</span>
+                      <span>{"\u26FD "+fuelCost+" deut"}</span>
+                    </div>
+                    <button onClick={function(){
+                      var availCargos=(myState&&myState.ships&&myState.ships.cargo)||0;
+                      var availDeut=(myState&&myState.resources&&myState.resources.deut)||0;
+                      if(availCargos<cargos){alert("Cargos insuffisants : "+cargos+" requis, "+availCargos+" disponible(s)");return;}
+                      if(availDeut<fuelCost){alert("Deut\u00E9rium insuffisant : "+fuelCost+" requis, "+availDeut+" disponible(s)");return;}
+                      // Build the fleet object — kind="anomaly" tells the tick to handle it specially
+                      var nowMs=Date.now();
+                      var fleet={
+                        id:"af_"+nowMs.toString(36)+"_"+Math.floor(Math.random()*1000),
+                        kind:"anomaly",
+                        anomalyId:anom.id,
+                        anomalyType:anom.type,
+                        anomalyChoiceId:c.id,
+                        ships:{cargo:cargos},
+                        departAt:nowMs,
+                        arriveAt:nowMs+travelMs/2,
+                        returning:false,
+                        fuelCost:fuelCost,
+                        anomalyReward:(function(){
+                          if(c.rewardKind==="resources"){
+                            return{kind:"resources",metal:Math.round((c.rewardBase.metal||0)*anom.intensity),crystal:Math.round((c.rewardBase.crystal||0)*anom.intensity),deut:Math.round((c.rewardBase.deut||0)*anom.intensity)};
+                          } else if(c.rewardKind==="boost"){
+                            return{kind:"boost",boostType:c.rewardBase.boostType,percent:c.rewardBase.percent,durationMs:c.rewardBase.durationMs};
+                          } else {
+                            return{kind:"tech_or_boost",boostPercent:c.rewardBase.boostPercent,boostDurationMs:c.rewardBase.boostDurationMs};
+                          }
+                        })()
+                      };
+                      var ok=onLaunchAnomalyFleet&&onLaunchAnomalyFleet(fleet);
+                      if(ok!==false){
+                        AudioEngine.safeBuildDone&&AudioEngine.safeBuildDone();
+                        setAnalyzeModal(null);
+                      }
+                    }} style={{marginTop:8,width:"100%",padding:"8px 0",background:((myState&&myState.ships&&myState.ships.cargo||0)>=cargos&&(myState&&myState.resources&&myState.resources.deut||0)>=fuelCost)?"linear-gradient(135deg,rgba(80,50,140,0.9),rgba(50,30,90,0.9))":"rgba(40,30,40,0.6)",border:"1px solid "+(((myState&&myState.ships&&myState.ships.cargo||0)>=cargos&&(myState&&myState.resources&&myState.resources.deut||0)>=fuelCost)?"#aa66ff":"#553355"),borderRadius:6,color:((myState&&myState.ships&&myState.ships.cargo||0)>=cargos&&(myState&&myState.resources&&myState.resources.deut||0)>=fuelCost)?"#fff":"#7a6680",fontSize:10,cursor:"pointer",fontFamily:"monospace",fontWeight:"bold",letterSpacing:1}}>{((myState&&myState.ships&&myState.ships.cargo||0)>=cargos&&(myState&&myState.resources&&myState.resources.deut||0)>=fuelCost)?"LANCER L\u2019EXP\u00C9DITION":"RESSOURCES INSUFFISANTES"}</button>
+                  </div>
+                );
+              })}
+              <button onClick={()=>setAnalyzeModal(null)} style={{width:"100%",padding:"8px 0",background:"rgba(20,15,30,0.8)",border:"1px solid #4a3070",borderRadius:6,color:"#9a8ac0",fontSize:9,cursor:"pointer",fontFamily:"monospace",letterSpacing:1,marginTop:4}}>{"ANNULER"}</button>
+            </div>
+          </div>
+        );
+      })():null}
+    </div>
+  );
+}
+
+// Visual stick indicator for the joystick (reads ctrlRef via parent context)
+function JoyStickIndicator(){
+  // Update visual position by reading parent ref via a ref-less re-render approach.
+  // For simplicity in this prototype, the indicator is purely decorative (a centered dot).
+  // The actual control is read from ctrlRef in the animation loop.
+  return(
+    <div style={{position:"absolute",top:"50%",left:"50%",transform:"translate(-50%,-50%)",width:30,height:30,borderRadius:"50%",background:"radial-gradient(circle,rgba(120,180,240,0.6),rgba(40,80,140,0.3))",border:"1px solid rgba(150,200,255,0.5)",pointerEvents:"none"}}/>
+  );
+}
+
+
+// Treasure-map style terrain drawings — inked silhouettes with fill
+function drawZone3D(ctx,type,x,y,s){
+  var INK="#3a2208";
+  var INKL="#5a3a18";
+  var lw=Math.max(1.2,s*0.09);
+
+  if(type==="mountain"){
+    // Triple peak mountains like on pirate maps
+    ctx.fillStyle="#8a7050";ctx.strokeStyle=INK;ctx.lineWidth=lw;
+    ctx.beginPath();
+    ctx.moveTo(x-s*1.1,y+s*0.7);
+    ctx.lineTo(x-s*0.75,y+s*0.2);
+    ctx.lineTo(x-s*0.5,y+s*0.4);
+    ctx.lineTo(x-s*0.2,y-s*0.5);
+    ctx.lineTo(x+s*0.1,y+s*0.1);
+    ctx.lineTo(x+s*0.4,y-s*0.8);
+    ctx.lineTo(x+s*0.7,y+s*0.2);
+    ctx.lineTo(x+s*0.9,y-s*0.1);
+    ctx.lineTo(x+s*1.1,y+s*0.7);
+    ctx.closePath();ctx.fill();ctx.stroke();
+    // Hatching lines on the shadow side of each peak (classic map shading)
+    ctx.strokeStyle=INK;ctx.lineWidth=Math.max(0.8,s*0.06);
+    for(var hi=0;hi<3;hi++){
+      var hx=x-s*0.2+hi*s*0.1-s*0.05;
+      ctx.beginPath();
+      ctx.moveTo(hx,y-s*0.3+hi*s*0.1);
+      ctx.lineTo(hx-s*0.15,y+s*0.05+hi*s*0.1);
+      ctx.stroke();
+    }
+    // White snow caps on the tips
+    ctx.fillStyle="#ffffff";
+    ctx.beginPath();ctx.moveTo(x-s*0.3,y-s*0.3);ctx.lineTo(x-s*0.2,y-s*0.5);ctx.lineTo(x-s*0.1,y-s*0.2);ctx.closePath();ctx.fill();
+    ctx.beginPath();ctx.moveTo(x+s*0.3,y-s*0.55);ctx.lineTo(x+s*0.4,y-s*0.8);ctx.lineTo(x+s*0.52,y-s*0.45);ctx.closePath();ctx.fill();
+    ctx.strokeStyle=INKL;ctx.lineWidth=Math.max(0.5,s*0.04);
+    ctx.beginPath();ctx.moveTo(x-s*0.3,y-s*0.3);ctx.lineTo(x-s*0.2,y-s*0.5);ctx.lineTo(x-s*0.1,y-s*0.2);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(x+s*0.3,y-s*0.55);ctx.lineTo(x+s*0.4,y-s*0.8);ctx.lineTo(x+s*0.52,y-s*0.45);ctx.stroke();
+  }
+  else if(type==="volcano"){
+    // Volcano spewing smoke and lava — iconic treasure map style
+    // Smoke puffs at top
+    ctx.fillStyle="#6a5a4a";ctx.strokeStyle=INK;ctx.lineWidth=Math.max(0.8,s*0.06);
+    for(var sm=0;sm<3;sm++){
+      var sx=x-s*0.15+sm*s*0.2,sy=y-s*1.1-sm*s*0.2;
+      ctx.beginPath();ctx.arc(sx,sy,s*0.22,0,Math.PI*2);ctx.fill();ctx.stroke();
+    }
+    // Mountain body
+    ctx.fillStyle="#7a5030";ctx.strokeStyle=INK;ctx.lineWidth=lw;
+    ctx.beginPath();
+    ctx.moveTo(x-s*1.05,y+s*0.75);
+    ctx.lineTo(x-s*0.3,y-s*0.7);
+    ctx.lineTo(x-s*0.1,y-s*0.55);
+    ctx.lineTo(x+s*0.15,y-s*0.85);
+    ctx.lineTo(x+s*0.35,y-s*0.7);
+    ctx.lineTo(x+s*1.05,y+s*0.75);
+    ctx.closePath();ctx.fill();ctx.stroke();
+    // Lava in crater — bright red
+    ctx.fillStyle="#d83818";
+    ctx.beginPath();
+    ctx.moveTo(x-s*0.3,y-s*0.7);
+    ctx.lineTo(x-s*0.1,y-s*0.55);
+    ctx.lineTo(x+s*0.15,y-s*0.85);
+    ctx.lineTo(x+s*0.35,y-s*0.7);
+    ctx.lineTo(x+s*0.25,y-s*0.6);
+    ctx.lineTo(x-s*0.2,y-s*0.6);
+    ctx.closePath();ctx.fill();
+    ctx.strokeStyle=INK;ctx.lineWidth=lw;
+    ctx.beginPath();
+    ctx.moveTo(x-s*0.3,y-s*0.7);ctx.lineTo(x-s*0.1,y-s*0.55);ctx.lineTo(x+s*0.15,y-s*0.85);ctx.lineTo(x+s*0.35,y-s*0.7);ctx.stroke();
+    // Lava dripping down the side
+    ctx.fillStyle="#e04020";
+    ctx.beginPath();
+    ctx.moveTo(x+s*0.1,y-s*0.65);
+    ctx.bezierCurveTo(x+s*0.3,y-s*0.3,x+s*0.5,y+s*0.1,x+s*0.4,y+s*0.55);
+    ctx.lineTo(x+s*0.25,y+s*0.5);
+    ctx.bezierCurveTo(x+s*0.35,y+s*0.15,x+s*0.15,y-s*0.3,x,y-s*0.6);
+    ctx.closePath();ctx.fill();
+    ctx.strokeStyle=INK;ctx.lineWidth=Math.max(0.8,s*0.07);
+    ctx.beginPath();
+    ctx.moveTo(x+s*0.1,y-s*0.65);
+    ctx.bezierCurveTo(x+s*0.3,y-s*0.3,x+s*0.5,y+s*0.1,x+s*0.4,y+s*0.55);
+    ctx.stroke();
+  }
+  else if(type==="forest"){
+    // Cluster of pine trees like on maps
+    var drawPine=function(tx,ty,ts){
+      ctx.fillStyle="#2a5018";ctx.strokeStyle=INK;ctx.lineWidth=Math.max(0.8,ts*0.1);
+      // Trunk
+      ctx.fillStyle="#5a3818";
+      ctx.fillRect(tx-ts*0.08,ty+ts*0.3,ts*0.16,ts*0.35);
+      ctx.strokeRect(tx-ts*0.08,ty+ts*0.3,ts*0.16,ts*0.35);
+      // 3-tier triangle crown
+      ctx.fillStyle="#2a6020";ctx.strokeStyle=INK;
+      ctx.beginPath();
+      ctx.moveTo(tx,ty-ts*0.85);
+      ctx.lineTo(tx-ts*0.5,ty-ts*0.25);
+      ctx.lineTo(tx-ts*0.25,ty-ts*0.3);
+      ctx.lineTo(tx-ts*0.55,ty+ts*0.1);
+      ctx.lineTo(tx-ts*0.3,ty+ts*0.05);
+      ctx.lineTo(tx-ts*0.65,ty+ts*0.4);
+      ctx.lineTo(tx+ts*0.65,ty+ts*0.4);
+      ctx.lineTo(tx+ts*0.3,ty+ts*0.05);
+      ctx.lineTo(tx+ts*0.55,ty+ts*0.1);
+      ctx.lineTo(tx+ts*0.25,ty-ts*0.3);
+      ctx.lineTo(tx+ts*0.5,ty-ts*0.25);
+      ctx.closePath();ctx.fill();ctx.stroke();
+    };
+    // Draw 3 pines: one in center-back, two flanking in front
+    drawPine(x,y-s*0.1,s*0.85);
+    drawPine(x-s*0.55,y+s*0.25,s*0.65);
+    drawPine(x+s*0.55,y+s*0.25,s*0.65);
+  }
+  else if(type==="ocean"||type==="coast"){
+    // Stylized waves like on maps — curvy lines over light blue
+    // Sailing ship silhouette (iconic!)
+    ctx.fillStyle="#6a4828";ctx.strokeStyle=INK;ctx.lineWidth=Math.max(0.8,s*0.06);
+    // Hull
+    ctx.beginPath();
+    ctx.moveTo(x-s*0.55,y+s*0.2);
+    ctx.lineTo(x+s*0.55,y+s*0.2);
+    ctx.lineTo(x+s*0.4,y+s*0.45);
+    ctx.lineTo(x-s*0.4,y+s*0.45);
+    ctx.closePath();ctx.fill();ctx.stroke();
+    // Mast
+    ctx.strokeStyle=INK;ctx.lineWidth=Math.max(1.2,s*0.08);
+    ctx.beginPath();ctx.moveTo(x,y+s*0.2);ctx.lineTo(x,y-s*0.55);ctx.stroke();
+    // Sail
+    ctx.fillStyle="#f0e0c0";ctx.strokeStyle=INK;ctx.lineWidth=Math.max(0.8,s*0.06);
+    ctx.beginPath();
+    ctx.moveTo(x,y-s*0.5);
+    ctx.lineTo(x+s*0.35,y-s*0.3);
+    ctx.lineTo(x+s*0.3,y+s*0.1);
+    ctx.lineTo(x,y);
+    ctx.closePath();ctx.fill();ctx.stroke();
+    // Wave lines around the ship
+    ctx.strokeStyle=INK;ctx.lineWidth=Math.max(0.8,s*0.07);ctx.lineCap="round";
+    ctx.beginPath();
+    ctx.moveTo(x-s*0.9,y+s*0.65);
+    ctx.bezierCurveTo(x-s*0.7,y+s*0.55,x-s*0.5,y+s*0.75,x-s*0.3,y+s*0.6);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(x+s*0.3,y+s*0.65);
+    ctx.bezierCurveTo(x+s*0.5,y+s*0.55,x+s*0.7,y+s*0.75,x+s*0.9,y+s*0.6);
+    ctx.stroke();
+  }
+  else if(type==="ice"||type==="tundra"){
+    // Iceberg / igloo style — triangular ice peaks
+    // 3 iceberg triangles
+    ctx.fillStyle="#ffffff";ctx.strokeStyle="#3a5a7a";ctx.lineWidth=Math.max(0.9,s*0.07);
+    // Main iceberg
+    ctx.beginPath();
+    ctx.moveTo(x-s*0.4,y+s*0.5);
+    ctx.lineTo(x,y-s*0.5);
+    ctx.lineTo(x+s*0.3,y-s*0.1);
+    ctx.lineTo(x+s*0.5,y+s*0.5);
+    ctx.closePath();ctx.fill();ctx.stroke();
+    // Small berg left
+    ctx.beginPath();
+    ctx.moveTo(x-s*0.85,y+s*0.55);
+    ctx.lineTo(x-s*0.55,y+s*0.05);
+    ctx.lineTo(x-s*0.3,y+s*0.55);
+    ctx.closePath();ctx.fill();ctx.stroke();
+    // Small berg right  
+    ctx.beginPath();
+    ctx.moveTo(x+s*0.35,y+s*0.55);
+    ctx.lineTo(x+s*0.65,y+s*0.15);
+    ctx.lineTo(x+s*0.85,y+s*0.55);
+    ctx.closePath();ctx.fill();ctx.stroke();
+    // Blue shadow on one side of main iceberg
+    ctx.fillStyle="rgba(100,140,180,0.4)";
+    ctx.beginPath();
+    ctx.moveTo(x+s*0.3,y-s*0.1);
+    ctx.lineTo(x+s*0.5,y+s*0.5);
+    ctx.lineTo(x+s*0.15,y+s*0.5);
+    ctx.closePath();ctx.fill();
+  }
+  else if(type==="desert"){
+    // Sandy circle with palm tree and sand waves
+    // Sand wave lines
+    ctx.strokeStyle="rgba(120,80,30,0.6)";ctx.lineWidth=Math.max(0.8,s*0.07);ctx.lineCap="round";
+    ctx.beginPath();
+    ctx.moveTo(x-s*0.7,y-s*0.3);
+    ctx.bezierCurveTo(x-s*0.3,y-s*0.5,x+s*0.3,y-s*0.1,x+s*0.7,y-s*0.4);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(x-s*0.7,y+s*0.6);
+    ctx.bezierCurveTo(x-s*0.3,y+s*0.4,x+s*0.3,y+s*0.7,x+s*0.7,y+s*0.5);
+    ctx.stroke();
+    // Palm tree silhouette in center
+    ctx.strokeStyle=INK;ctx.lineWidth=Math.max(1,s*0.08);
+    ctx.beginPath();
+    ctx.moveTo(x-s*0.05,y+s*0.4);
+    ctx.bezierCurveTo(x,y,x+s*0.08,y-s*0.3,x+s*0.05,y-s*0.5);
+    ctx.stroke();
+    ctx.fillStyle="#2a7028";ctx.strokeStyle=INK;ctx.lineWidth=Math.max(0.8,s*0.06);
+    // Palm fronds
+    for(var pf=0;pf<5;pf++){
+      var ang=(pf/5)*Math.PI*2-Math.PI*0.4;
+      ctx.beginPath();
+      ctx.moveTo(x+s*0.05,y-s*0.5);
+      ctx.bezierCurveTo(
+        x+Math.cos(ang)*s*0.25,y-s*0.5+Math.sin(ang)*s*0.25-s*0.1,
+        x+Math.cos(ang)*s*0.45,y-s*0.5+Math.sin(ang)*s*0.4,
+        x+Math.cos(ang)*s*0.55,y-s*0.5+Math.sin(ang)*s*0.55
+      );
+      ctx.bezierCurveTo(
+        x+Math.cos(ang)*s*0.5+s*0.05,y-s*0.5+Math.sin(ang)*s*0.5+s*0.05,
+        x+Math.cos(ang)*s*0.3,y-s*0.5+Math.sin(ang)*s*0.3,
+        x+s*0.05,y-s*0.5
+      );
+      ctx.closePath();ctx.fill();ctx.stroke();
+    }
+  }
+  else if(type==="plain"){
+    // Grassland with a lone tree — map-style
+    // Rolling hills (curvy lines)
+    ctx.strokeStyle="rgba(50,80,30,0.6)";ctx.lineWidth=Math.max(0.8,s*0.07);ctx.lineCap="round";
+    ctx.beginPath();
+    ctx.moveTo(x-s*0.7,y+s*0.3);
+    ctx.bezierCurveTo(x-s*0.4,y+s*0.1,x-s*0.1,y+s*0.4,x+s*0.2,y+s*0.2);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(x+s*0.1,y+s*0.6);
+    ctx.bezierCurveTo(x+s*0.4,y+s*0.4,x+s*0.6,y+s*0.7,x+s*0.8,y+s*0.5);
+    ctx.stroke();
+    // Single round tree (deciduous, to differ from forest pines)
+    ctx.fillStyle="#5a3818";
+    ctx.fillRect(x-s*0.06,y+s*0.05,s*0.12,s*0.3);
+    ctx.strokeStyle=INK;ctx.lineWidth=Math.max(0.8,s*0.07);
+    ctx.strokeRect(x-s*0.06,y+s*0.05,s*0.12,s*0.3);
+    ctx.fillStyle="#4a8a30";ctx.strokeStyle=INK;
+    // Cloud-shaped foliage (circles combined)
+    ctx.beginPath();
+    ctx.arc(x-s*0.22,y-s*0.15,s*0.22,0,Math.PI*2);
+    ctx.arc(x+s*0.15,y-s*0.25,s*0.25,0,Math.PI*2);
+    ctx.arc(x,y-s*0.35,s*0.2,0,Math.PI*2);
+    ctx.arc(x-s*0.05,y-s*0.05,s*0.2,0,Math.PI*2);
+    ctx.arc(x+s*0.2,y-s*0.05,s*0.18,0,Math.PI*2);
+    ctx.fill();ctx.stroke();
+    // Small flowers
+    ctx.fillStyle="#ffe040";ctx.strokeStyle="rgba(160,100,0,0.7)";ctx.lineWidth=Math.max(0.5,s*0.04);
+    [[-0.6,0.45],[-0.35,0.6],[0.55,0.4]].forEach(function(p){
+      ctx.beginPath();ctx.arc(x+p[0]*s,y+p[1]*s,s*0.07,0,Math.PI*2);ctx.fill();ctx.stroke();
+    });
+  }
+  else if(type==="swamp"){
+    // Murky pond with dead tree
+    // Water pools
+    ctx.fillStyle="#3a4828";ctx.strokeStyle=INK;ctx.lineWidth=Math.max(0.8,s*0.06);
+    ctx.beginPath();ctx.ellipse(x-s*0.3,y-s*0.2,s*0.4,s*0.28,0.2,0,Math.PI*2);ctx.fill();ctx.stroke();
+    ctx.beginPath();ctx.ellipse(x+s*0.35,y+s*0.3,s*0.3,s*0.22,-0.3,0,Math.PI*2);ctx.fill();ctx.stroke();
+    // Dead tree (bare branches)
+    ctx.strokeStyle=INK;ctx.lineWidth=Math.max(1.1,s*0.09);ctx.lineCap="round";
+    ctx.beginPath();
+    ctx.moveTo(x+s*0.1,y+s*0.4);
+    ctx.lineTo(x+s*0.15,y-s*0.4);
+    ctx.stroke();
+    // Branches
+    ctx.lineWidth=Math.max(0.8,s*0.06);
+    ctx.beginPath();ctx.moveTo(x+s*0.15,y-s*0.1);ctx.lineTo(x-s*0.1,y-s*0.3);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(x+s*0.15,y-s*0.25);ctx.lineTo(x+s*0.4,y-s*0.4);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(x+s*0.15,y-s*0.35);ctx.lineTo(x,y-s*0.55);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(x+s*0.15,y-s*0.35);ctx.lineTo(x+s*0.3,y-s*0.55);ctx.stroke();
+  }
+  else {
+    // Fallback
+    ctx.fillStyle="#8a7858";ctx.strokeStyle=INK;ctx.lineWidth=lw;
+    ctx.beginPath();ctx.arc(x,y,s*0.9,0,Math.PI*2);ctx.fill();ctx.stroke();
+  }
+}
+
+function genContinentOverlayTexture(planet,continents,sz){
+  sz=sz||1024;
+  var cv=document.createElement("canvas");cv.width=sz;cv.height=sz;
+  var ctx=cv.getContext("2d");
+  if(!continents||!continents.length)return cv;
+  continents.forEach(function(cont){
+    var hex=cont.color;
+    var cr=parseInt(hex.slice(1,3),16),cg=parseInt(hex.slice(3,5),16),cb=parseInt(hex.slice(5,7),16);
+    // ── NEW PATH: cells-based rendering (physical landmass) ──
+    // SIMPLIFIED: no outline drawing to avoid sinusoidal/pole artifacts.
+    // Clicks are handled via invisible 3D hit meshes in Planet3D (not based on texture).
+    // Visuals: just a soft central glow and label at the continent\'s centroid.
+    if(cont.cells&&cont.cells.length>0&&cont.gw&&cont.gh){
+      // Project 3D centroid to 2D texture coords
+      var labelPhi=Math.acos(Math.max(-1,Math.min(1,cont.cy)));
+      var labelTheta=Math.atan2(cont.cz,cont.cx);
+      var lu=labelTheta/(Math.PI*2);if(lu<0)lu+=1;
+      var lx=lu*sz;
+      var ly=(labelPhi/Math.PI)*sz;
+      // Soft central glow — marks the continent\'s "capital" area without drawing any outline
+      ctx.save();
+      // Very subtle center marker — just a tiny dark dot + tiny bright spot
+      // so labels have an anchor point but no visible "island" on the planet surface.
+      ctx.save();
+      ctx.fillStyle="rgba(0,0,0,0.35)";
+      ctx.beginPath();ctx.arc(lx,ly,sz*0.005,0,Math.PI*2);ctx.fill();
+      ctx.fillStyle="rgba(255,255,255,0.55)";
+      ctx.beginPath();ctx.arc(lx,ly,sz*0.003,0,Math.PI*2);ctx.fill();
+      ctx.restore();
+      // Also draw at seam offsets
+      [sz,-sz].forEach(function(ox){
+        ctx.save();
+        ctx.fillStyle="rgba(0,0,0,0.35)";
+        ctx.beginPath();ctx.arc(lx+ox,ly,sz*0.005,0,Math.PI*2);ctx.fill();
+        ctx.restore();
+      });
+      ctx.restore();
+      // Label is now rendered as an HTML overlay (see Planet3D render), not on the texture.
+      return; // done for this continent
+    }
+    // ── LEGACY PATH: gas giants / planets without detectable landmasses ──
+    // SIMPLIFIED to match the new landmass-based style: just a soft glow + label at the continent center.
+    // Click handling is via invisible 3D hit meshes regardless of visuals.
+    var cPhi=Math.acos(Math.max(-1,Math.min(1,cont.cy)));
+    var cTheta=Math.atan2(cont.cz,cont.cx);
+    var lu=cTheta/(Math.PI*2);if(lu<0)lu+=1;
+    var lx=lu*sz;
+    var ly=(cPhi/Math.PI)*sz;
+    // Soft central glow
+    ctx.save();
+    ctx.save();
+    ctx.fillStyle="rgba(0,0,0,0.35)";
+    ctx.beginPath();ctx.arc(lx,ly,sz*0.005,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle="rgba(255,255,255,0.55)";
+    ctx.beginPath();ctx.arc(lx,ly,sz*0.003,0,Math.PI*2);ctx.fill();
+    ctx.restore();
+    [sz,-sz].forEach(function(ox){
+      ctx.save();
+      ctx.fillStyle="rgba(0,0,0,0.35)";
+      ctx.beginPath();ctx.arc(lx+ox,ly,sz*0.005,0,Math.PI*2);ctx.fill();
+      ctx.restore();
+    });
+    ctx.restore();
+    // Labels are rendered as HTML overlay buttons in Planet3D, not on the texture.
+  });
+  return cv;
+}
+
+function Planet3D({planet,allPlanets,zones,continents,onZoneClick,isMyPlanet,fs,onBuildingClick,buildings,queue,onFinalizeQueue,onContinentClick}){
+  const mountRef=useRef(),stateRef=useRef({}),dragRef=useRef({on:false,x:0,y:0,theta:0,phi:Math.PI/2,vTheta:0,vPhi:0,dist:2.85,moved:false});
+  const texRef=useRef(null),cloudTexRef=useRef(null);
+  const queueRef=useRef(queue),zonesRef=useRef(zones),buildingsRef=useRef(buildings);
+  const[contLabelPositions,setContLabelPositions]=useState([]);
+  const contLabelPosRef=useRef([]);
+  queueRef.current=queue;
+  zonesRef.current=zones;
+  buildingsRef.current=buildings;
+  useEffect(()=>{
+    if(!window.THREE||!planet||!mountRef.current)return;
+    const T=window.THREE,div=mountRef.current;
+    if(stateRef.current.af)cancelAnimationFrame(stateRef.current.af);
+    if(stateRef.current.renderer){try{stateRef.current.renderer.forceContextLoss&&stateRef.current.renderer.forceContextLoss();}catch(e){}stateRef.current.renderer.dispose();while(div.firstChild)div.removeChild(div.firstChild);}
+    const W=div.clientWidth||div.offsetWidth||window.innerWidth||700,H=div.clientHeight||div.offsetHeight||window.innerHeight||560;
+    const renderer=new T.WebGLRenderer({antialias:true,alpha:false});
+    renderer.setSize(W,H);renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
+    renderer.setClearColor(0x000005,1);
+    div.appendChild(renderer.domElement);
+    const scene=new T.Scene();
+    const CAM_START=6.5,CAM_END=2.85,INTRO_DUR=2.2;
+    let introT=0,introDone=false;
+    const cam=new T.PerspectiveCamera(42,W/H,0.1,200);cam.position.z=CAM_START;
+    // ===== IMMERSIVE BACKGROUND =====
+    // Nebula background — boosted brightness to be clearly visible
+    const nebCv=genNebulaTexture(planet.seed+9999,1024);
+    // Brighten the nebula canvas so dark themes are still visible
+    const nCtx=nebCv.getContext("2d");
+    const nImg=nCtx.getImageData(0,0,nebCv.width,nebCv.height);
+    const nD=nImg.data;
+    for(let i=0;i<nD.length;i+=4){
+      // Boost brightness
+      nD[i]=Math.min(255,nD[i]*1.6+20);
+      nD[i+1]=Math.min(255,nD[i+1]*1.6+20);
+      nD[i+2]=Math.min(255,nD[i+2]*1.6+20);
+      // Keep alpha but boost if any color is present
+      if(nD[i]+nD[i+1]+nD[i+2]>60)nD[i+3]=Math.min(255,nD[i+3]*2);
+    }
+    nCtx.putImageData(nImg,0,0);
+    // Nebula is now equirectangular and cyclical by construction — no seam blend needed.
+    const nebTex=new T.CanvasTexture(nebCv);
+    nebTex.wrapS=T.RepeatWrapping; // ensure horizontal wrap
+    nebTex.needsUpdate=true;
+    const nebMesh=new T.Mesh(new T.SphereGeometry(25,64,32),new T.MeshBasicMaterial({map:nebTex,side:T.BackSide,transparent:true,opacity:1,depthWrite:false,blending:T.AdditiveBlending}));
+    scene.add(nebMesh);
+    // Twinkling star layers — more variety and life than before
+    const starLayers=[];
+    [[3500,12,18,.06,0.95,0xffffff,2.4],[2000,10,16,.09,0.8,0xddeeff,1.7],[1000,9,14,.12,0.6,0xaaccff,1.1],[500,8,13,.16,0.5,0xffeecc,0.8]].forEach(([cnt,mn,mx,sz,op,col,freq])=>{
+      const sp=new Float32Array(cnt*3);
+      for(let i=0;i<cnt*3;i+=3){const a=Math.random()*Math.PI*2,b=Math.acos(2*Math.random()-1),r=mn+Math.random()*(mx-mn);sp[i]=r*Math.sin(b)*Math.cos(a);sp[i+1]=r*Math.sin(b)*Math.sin(a);sp[i+2]=r*Math.cos(b);}
+      const sg=new T.BufferGeometry();sg.setAttribute("position",new T.BufferAttribute(sp,3));
+      const mat=new T.PointsMaterial({color:col,size:sz,transparent:true,opacity:op});
+      scene.add(new T.Points(sg,mat));
+      starLayers.push({mat,baseOp:op,freq,phase:Math.random()*Math.PI*2});
+    });
+    // Bright foreground scintillating stars
+    const bsCount=60;
+    const bspts=new Float32Array(bsCount*3);
+    for(let i=0;i<bsCount;i++){
+      const a=Math.random()*Math.PI*2,b=Math.acos(2*Math.random()-1),r=7+Math.random()*4;
+      bspts[i*3]=r*Math.sin(b)*Math.cos(a);bspts[i*3+1]=r*Math.sin(b)*Math.sin(a);bspts[i*3+2]=r*Math.cos(b);
+    }
+    const bsGeo=new T.BufferGeometry();bsGeo.setAttribute("position",new T.BufferAttribute(bspts,3));
+    const bsMat=new T.PointsMaterial({color:0xffffff,size:0.2,transparent:true,opacity:0.9,blending:T.AdditiveBlending,depthWrite:false});
+    scene.add(new T.Points(bsGeo,bsMat));
+    // Distant sun — BIG and unmistakable
+    const sunCv=document.createElement("canvas");sunCv.width=sunCv.height=256;
+    const sunC=sunCv.getContext("2d");
+    // Core sun
+    const sunG=sunC.createRadialGradient(128,128,0,128,128,128);
+    sunG.addColorStop(0,"rgba(255,255,240,1)");
+    sunG.addColorStop(0.1,"rgba(255,240,180,1)");
+    sunG.addColorStop(0.25,"rgba(255,210,120,0.8)");
+    sunG.addColorStop(0.5,"rgba(255,170,70,0.35)");
+    sunG.addColorStop(0.8,"rgba(255,130,40,0.1)");
+    sunG.addColorStop(1,"rgba(255,100,20,0)");
+    sunC.fillStyle=sunG;sunC.fillRect(0,0,256,256);
+    const sunSprite=new T.Sprite(new T.SpriteMaterial({map:new T.CanvasTexture(sunCv),transparent:true,blending:T.AdditiveBlending,depthTest:true,depthWrite:false}));
+    const sunDist=7,sunAngle=(planet.i||0)*0.12+2;
+    sunSprite.position.set(Math.cos(sunAngle)*sunDist,1.5,Math.sin(sunAngle)*sunDist);
+    sunSprite.scale.set(3.5,3.5,1);
+    scene.add(sunSprite);
+    // Distant sister planets — use colored disks (not additive) so they show their real color
+    const distPlanets=[];
+    if(allPlanets&&Array.isArray(allPlanets)){
+      const near=allPlanets.filter(p=>p&&p.i!==planet.i).slice(0,8);
+      near.forEach((p,i)=>{
+        const pal=getPlanetPalette(p);
+        const rgb=pal.l||pal.b2||[140,140,180];
+        // Build per-planet colored texture so the color really shows
+        const pCv=document.createElement("canvas");pCv.width=pCv.height=64;
+        const pC=pCv.getContext("2d");
+        const colHex="rgb("+rgb[0]+","+rgb[1]+","+rgb[2]+")";
+        const pG=pC.createRadialGradient(32,32,0,32,32,28);
+        pG.addColorStop(0,"rgba(255,255,255,0.95)");
+        pG.addColorStop(0.3,colHex);
+        pG.addColorStop(0.7,colHex.replace("rgb","rgba").replace(")",",0.6)"));
+        pG.addColorStop(1,colHex.replace("rgb","rgba").replace(")",",0)"));
+        pC.fillStyle=pG;pC.fillRect(0,0,64,64);
+        const pSprMat=new T.SpriteMaterial({map:new T.CanvasTexture(pCv),transparent:true,depthTest:true,depthWrite:false});
+        const spr=new T.Sprite(pSprMat);
+        const a=(i/8)*Math.PI*2+Math.random()*0.3,r=4.5+Math.random()*2,y=(Math.random()-0.5)*2.5;
+        spr.position.set(Math.cos(a)*r,y,Math.sin(a)*r);
+        const sz=0.4+Math.random()*0.3;
+        spr.scale.set(sz,sz,1);
+        scene.add(spr);
+        distPlanets.push({sprite:spr,phase:Math.random()*Math.PI*2});
+      });
+    }
+    // Slow-drifting distant asteroids — small gray points that give sense of motion
+    const astCount=150;
+    const astPts=new Float32Array(astCount*3);
+    const astVel=[];
+    for(let i=0;i<astCount;i++){
+      const a=Math.random()*Math.PI*2,b=Math.acos(2*Math.random()-1),r=5+Math.random()*4;
+      astPts[i*3]=r*Math.sin(b)*Math.cos(a);astPts[i*3+1]=r*Math.sin(b)*Math.sin(a);astPts[i*3+2]=r*Math.cos(b);
+      astVel.push({vx:(Math.random()-0.5)*0.003,vy:(Math.random()-0.5)*0.001,vz:(Math.random()-0.5)*0.003});
+    }
+    const astGeo=new T.BufferGeometry();astGeo.setAttribute("position",new T.BufferAttribute(astPts,3));
+    const astMat=new T.PointsMaterial({color:0xbbccee,size:0.1,transparent:true,opacity:0.75});
+    scene.add(new T.Points(astGeo,astMat));
+    // Comets — frequent shooting stars with trails
+    const comets=[];
+    const makePlanetComet=()=>{
+      const startA=Math.random()*Math.PI*2,startB=Math.acos(2*Math.random()-1),startR=9;
+      const start=new T.Vector3(startR*Math.sin(startB)*Math.cos(startA),startR*Math.sin(startB)*Math.sin(startA),startR*Math.cos(startB));
+      const endA=startA+Math.PI+(Math.random()-.5)*0.6;
+      const end=new T.Vector3(startR*Math.sin(startB)*Math.cos(endA),startR*Math.sin(startB+(Math.random()-.5)*0.4)*Math.sin(endA),startR*Math.cos(startB));
+      const trailLen=25;
+      const trailPts=new Float32Array(trailLen*3);
+      for(let i=0;i<trailLen*3;i++)trailPts[i]=start.x;
+      const trail=new T.BufferGeometry();trail.setAttribute("position",new T.BufferAttribute(trailPts,3));
+      const col=new T.Color().setHSL(0.55+Math.random()*0.2,0.8,0.7);
+      const trailMat=new T.LineBasicMaterial({color:col,transparent:true,opacity:0.9,blending:T.AdditiveBlending,depthWrite:false,linewidth:2});
+      const trailLine=new T.Line(trail,trailMat);
+      scene.add(trailLine);
+      const hCv=document.createElement("canvas");hCv.width=hCv.height=64;
+      const hC=hCv.getContext("2d"),hG=hC.createRadialGradient(32,32,0,32,32,32);
+      hG.addColorStop(0,"rgba(255,255,255,1)");hG.addColorStop(.3,"rgba(200,230,255,.9)");hG.addColorStop(1,"rgba(200,230,255,0)");
+      hC.fillStyle=hG;hC.fillRect(0,0,64,64);
+      const head=new T.Sprite(new T.SpriteMaterial({map:new T.CanvasTexture(hCv),transparent:true,opacity:1,blending:T.AdditiveBlending,depthTest:false}));
+      head.scale.set(0.6,0.6,1);
+      scene.add(head);
+      comets.push({start,end,progress:0,speed:0.004+Math.random()*0.003,trail,trailLine,head,trailLen});
+    };
+    let nextPlanetCometAt=2+Math.random()*3;
+    // ===== END IMMERSIVE BACKGROUND =====
+    texRef.current=genSurfaceTexture(planet,1024);
+    var _b=texRef.current,_f=document.createElement("canvas");_f.width=_b.width;_f.height=_b.height;
+    var _fc=_f.getContext("2d");_fc.drawImage(_b,0,0);
+    if(isMyPlanet&&continents&&continents.length){_fc.drawImage(genContinentOverlayTexture(planet,continents,_b.width),0,0);}
+    const surfTex=new T.CanvasTexture(_f);
+    surfTex.anisotropy=renderer.capabilities.getMaxAnisotropy();
+    const mesh=new T.Mesh(new T.SphereGeometry(1,96,96),new T.MeshPhongMaterial({
+      map:surfTex,bumpMap:surfTex,bumpScale:0.028,
+      specular:planet.water>15?new T.Color(.06,.16,.30):new T.Color(.02,.02,.02),
+      shininess:planet.water>15?45:4,
+    }));
+    mesh.rotation.z=planet.tilt*Math.PI/180;
+    scene.add(mesh);
+    let cloudMesh=null;
+    if(planet.clouds>0.05){
+      if(!cloudTexRef.current)cloudTexRef.current=genCloudTexture(planet,512);
+      const cTex=new T.CanvasTexture(cloudTexRef.current);
+      cloudMesh=new T.Mesh(new T.SphereGeometry(1.012,64,64),new T.MeshPhongMaterial({map:cTex,transparent:true,depthWrite:false,opacity:1,alphaMap:cTex}));
+      cloudMesh.rotation.z=planet.tilt*Math.PI/180;
+      scene.add(cloudMesh);
+    }
+    const atmosColors={Dense:new T.Color(.28,.52,1),Légère:new T.Color(.35,.6,1),Toxique:new T.Color(.55,.85,.2),Respirable:new T.Color(.25,.55,1),Tempétueuse:new T.Color(.6,.45,.85),Aucune:null};
+    const ac=atmosColors[planet.atmos];
+    if(ac){
+      scene.add(new T.Mesh(new T.SphereGeometry(1.055,48,48),new T.MeshPhongMaterial({color:ac,transparent:true,opacity:.07,depthWrite:false})));
+      scene.add(new T.Mesh(new T.SphereGeometry(1.14,48,48),new T.MeshPhongMaterial({color:ac,transparent:true,opacity:.12,side:T.BackSide,blending:T.AdditiveBlending,depthWrite:false})));
+    }
+    if(planet.hasRings&&planet.ringsUnlocked){
+      const rTex=new T.CanvasTexture(genRingTexture(planet,512));
+      const rGeo=new T.RingGeometry(1.4,2.8,128,4);
+      const pos=rGeo.attributes.position,uv=rGeo.attributes.uv;
+      for(let i=0;i<pos.count;i++){const rr=Math.sqrt(pos.getX(i)**2+pos.getZ(i)**2);uv.setXY(i,(rr-1.4)/(2.8-1.4),0);}
+      const rMesh=new T.Mesh(rGeo,new T.MeshBasicMaterial({map:rTex,side:T.DoubleSide,transparent:true,depthWrite:false,opacity:.85}));
+      rMesh.rotation.x=Math.PI/2+planet.ringTilt;rMesh.rotation.z=planet.tilt*Math.PI/180;
+      scene.add(rMesh);
+    }
+    const moonMeshes=[];
+    const moonsToShow=planet.moonsUnlocked?planet.moons:0;
+    for(let m=0;m<moonsToShow;m++){
+      const mr=rng(planet.seed+m*777),ms=.065+mr()*.075,md=1.55+m*.42+mr()*.12,ma=mr()*Math.PI*2;
+      const mCv=document.createElement("canvas");mCv.width=128;mCv.height=128;
+      const mCtx=mCv.getContext("2d"),mn=noise2d(planet.seed+m*333),mImg=mCtx.createImageData(128,128);
+      for(let py=0;py<128;py++){for(let px=0;px<128;px++){const val=fbm(mn,px/128*4,py/128*4,4)*.5+.5;const gr=Math.round(95+val*85);const idx2=(py*128+px)*4;mImg.data[idx2]=gr;mImg.data[idx2+1]=gr;mImg.data[idx2+2]=gr+12;mImg.data[idx2+3]=255;}}
+      mCtx.putImageData(mImg,0,0);
+      const mm=new T.Mesh(new T.SphereGeometry(ms,24,24),new T.MeshPhongMaterial({map:new T.CanvasTexture(mCv),bumpScale:0.02}));
+      scene.add(mm);moonMeshes.push({mesh:mm,dist:md,angle:ma,speed:.14+mr()*.22,tilt:(mr()-.5)*.3});
+    }
+    const markers=[];
+    const contHits=[];
+    const contLabelMats=[];
+    const continentLabelSprites=[];
+    const continentHitMeshes=[];
+    const buildingAnims=[];
+
+    if(isMyPlanet&&zones){
+      // Zone terrain colors
+      const TERRAIN_COLORS={
+        volcano:0xff4400, mountain:0x889aaa, forest:0x228833,
+        coast:0x22aacc,   plain:0x88bb44,    desert:0xcc8833,
+        tundra:0x88ccee,  swamp:0x446633
+      };
+      // Zone terrain secondary colors (glow/halo)
+      const TERRAIN_GLOW={
+        volcano:0xff6600, mountain:0xaabbcc, forest:0x44ff66,
+        coast:0x44ddff,   plain:0xaaddaa,    desert:0xffcc66,
+        tundra:0xaaeeff,  swamp:0x88ff88
+      };
+
+      zones.forEach((zone,zi)=>{
+        const normal=new T.Vector3(zone.lx,zone.ly,zone.lz).normalize();
+        const col=TERRAIN_COLORS[zone.type]||0x778899;
+        const glow=TERRAIN_GLOW[zone.type]||0x99aacc;
+        const surfacePos=normal.clone().multiplyScalar(1.005);
+        const alignQ=new T.Quaternion().setFromUnitVectors(new T.Vector3(0,1,0),normal);
+
+        if(zone.building){
+          // ── OCCUPIED ZONE: subtle pin marker (NOT the full 3D building) ──
+          // The full building is shown in the 2D continent map instead.
+          // Here we just show a small luminous marker so you can locate it on the globe.
+          const pinGroup=new T.Group();
+          pinGroup.position.copy(normal.clone().multiplyScalar(1.01));
+          pinGroup.setRotationFromQuaternion(alignQ);
+          // Small vertical beacon with colored glow at the top
+          const pinStem=new T.Mesh(new T.CylinderGeometry(.004,.006,.04,6),new T.MeshBasicMaterial({color:new T.Color(glow),transparent:true,opacity:.6}));
+          pinStem.position.y=.02;
+          pinGroup.add(pinStem);
+          // Glowing orb at top
+          const pinOrb=new T.Mesh(new T.SphereGeometry(.012,8,8),new T.MeshBasicMaterial({color:new T.Color(glow),transparent:true,opacity:.9,blending:T.AdditiveBlending,depthWrite:false}));
+          pinOrb.position.y=.044;
+          pinGroup.add(pinOrb);
+          // Ground ring at base
+          const pinRing=new T.Mesh(new T.RingGeometry(.012,.018,16),new T.MeshBasicMaterial({color:new T.Color(glow),transparent:true,opacity:.5,side:T.DoubleSide,blending:T.AdditiveBlending,depthWrite:false}));
+          pinRing.rotation.x=-Math.PI/2;
+          pinRing.position.y=.002;
+          pinGroup.add(pinRing);
+          pinGroup.userData={buildingId:zone.building,zoneId:zi,isPin:true,pinOrb,pinRing};
+          mesh.add(pinGroup);
+          markers.push(pinGroup);
+          // Glowing halo disc on surface (kept for soft terrain glow)
+          const haloGeo=new T.CircleGeometry(0.05,24);
+          const haloMat=new T.MeshBasicMaterial({color:new T.Color(glow),transparent:true,opacity:0,side:T.DoubleSide,blending:T.AdditiveBlending,depthWrite:false});
+          const halo=new T.Mesh(haloGeo,haloMat);
+          halo.position.copy(surfacePos);
+          halo.setRotationFromQuaternion(alignQ);
+          halo.userData={isHalo:true,phase:zi*.7};
+          mesh.add(halo);
+          buildingAnims.push({update:(t)=>{
+            const d=cam.position.length();
+            const fade=Math.max(0,Math.min(1,(4.5-d)/2.5));
+            halo.material.opacity=fade*(0.25+Math.sin(t*1.8+halo.userData.phase)*0.1);
+            // Pin orb pulses gently
+            pinOrb.material.opacity=.7+Math.sin(t*2+halo.userData.phase)*.25;
+            pinRing.material.opacity=.4+Math.sin(t*1.5+halo.userData.phase)*.2;
+          }});
+        } else {
+          // Empty zone - rendered on planet texture, no 3D mesh needed
+        }
+      });
+      const cg=new T.Group();
+      cg.visible=false;
+      mesh.add(cg);
+      stateRef.current.cg=cg;
+      const buildScaff=(prog)=>{
+        while(cg.children.length)cg.remove(cg.children[0]);
+        for(let p=0;p<4;p++){
+          const a=p*Math.PI/2+Math.PI/4;
+          const pole=new T.Mesh(new T.CylinderGeometry(.005,.005,.12,6),new T.MeshBasicMaterial({color:0xffaa22,transparent:true,opacity:.9}));
+          pole.position.set(Math.cos(a)*.07,.06,Math.sin(a)*.07);
+          cg.add(pole);
+        }
+        for(let h=0;h<3;h++){
+          const ht=.03+h*.04;
+          for(let s=0;s<4;s++){
+            const a1=s*Math.PI/2+Math.PI/4,a2=(s+1)*Math.PI/2+Math.PI/4;
+            const beam=new T.Mesh(new T.CylinderGeometry(.003,.003,.099,4),new T.MeshBasicMaterial({color:0xffcc44,transparent:true,opacity:.7}));
+            beam.position.set(Math.cos((a1+a2)/2)*.07,ht,Math.sin((a1+a2)/2)*.07);
+            beam.rotation.y=-(a1+a2)/2;beam.rotation.z=Math.PI/2;
+            cg.add(beam);
+          }
+        }
+        const ghost=new T.Mesh(new T.BoxGeometry(.07,.07,.07),new T.MeshBasicMaterial({color:0x44aaff,transparent:true,opacity:.15+prog*.25,side:T.DoubleSide}));
+        ghost.position.y=.035;cg.add(ghost);
+        for(let i=0;i<6;i++){
+          const sp=new T.Mesh(new T.SphereGeometry(.006,4,4),new T.MeshBasicMaterial({color:0xffdd44,transparent:true,opacity:.7}));
+          sp.userData={ph:i*Math.PI/3};cg.add(sp);
+        }
+        const rb=new T.Mesh(new T.TorusGeometry(.065,.004,4,32),new T.MeshBasicMaterial({color:0x334444,transparent:true,opacity:.4}));
+        rb.rotation.x=Math.PI/2;rb.position.y=.16;cg.add(rb);
+        const segs=Math.max(3,Math.round(32*prog));
+        const rf=new T.Mesh(new T.TorusGeometry(.065,.006,4,segs,Math.PI*2*prog),new T.MeshBasicMaterial({color:0x44ffaa,transparent:true,opacity:.9,blending:T.AdditiveBlending}));
+        rf.rotation.x=Math.PI/2;rf.position.y=.16;cg.add(rf);
+      };
+      let cgZoneId=null;
+      const timerCv=document.createElement("canvas");
+      timerCv.width=256;timerCv.height=64;
+      const timerTex=new T.CanvasTexture(timerCv);
+      const timerSprite=new T.Sprite(new T.SpriteMaterial({map:timerTex,transparent:true,depthTest:false,sizeAttenuation:true}));
+      timerSprite.scale.set(.55,.14,1);
+      timerSprite.position.y=.25;
+      timerSprite.visible=false;
+      cg.add(timerSprite);
+      const readyRing=new T.Mesh(
+        new T.TorusGeometry(.08,.008,6,32),
+        new T.MeshBasicMaterial({color:0x44ffaa,transparent:true,opacity:0,blending:T.AdditiveBlending})
+      );
+      readyRing.rotation.x=Math.PI/2;readyRing.position.y=.02;
+      cg.add(readyRing);
+      function drawTimer(text,ready){
+        const ctx=timerCv.getContext("2d");
+        ctx.clearRect(0,0,256,64);
+        ctx.fillStyle=ready?"rgba(20,180,100,.85)":"rgba(10,30,60,.85)";
+        ctx.beginPath();ctx.roundRect(4,4,248,56,12);ctx.fill();
+        ctx.strokeStyle=ready?"#44ffaa":"#2255aa";
+        ctx.lineWidth=2;ctx.beginPath();ctx.roundRect(4,4,248,56,12);ctx.stroke();
+        ctx.fillStyle=ready?"#ffffff":"#88ccff";
+        ctx.font="bold "+(ready?"18":"22")+"px monospace";
+        ctx.textAlign="center";ctx.textBaseline="middle";
+        ctx.fillText(text,128,32);
+        timerTex.needsUpdate=true;
+      }
+      buildingAnims.push({update:(t)=>{
+        const q=queueRef.current;
+        const zns=zonesRef.current||[];
+        if(!q||q.type!=="build"){
+          cg.visible=false;cgZoneId=null;
+          timerSprite.visible=false;
+          return;
+        }
+        const now=Date.now();
+        const prog=q.startAt?Math.max(.02,Math.min(.99,(now-q.startAt)/(q.finishAt-q.startAt))):.3;
+        const remaining=Math.max(0,Math.ceil((q.finishAt-now)/1000));
+        const ready=remaining<=0;
+        const bDef=BUILDINGS.find(b=>b.id===q.id);
+        const tz=zns.find(z=>z.building===q.id)||
+          (bDef&&zns.find(z=>z.terrain&&z.terrain.buildable&&!z.building&&bDef.terrainBonus&&bDef.terrainBonus.includes(z.type)))||
+          (bDef&&zns.find(z=>z.terrain&&z.terrain.buildable&&!z.building));
+        if(!tz){cg.visible=false;timerSprite.visible=false;return;}
+        if(tz.id!==cgZoneId){
+          const n=new T.Vector3(tz.lx,tz.ly,tz.lz).normalize();
+          cg.position.copy(n.clone().multiplyScalar(1.01));
+          cg.setRotationFromQuaternion(new T.Quaternion().setFromUnitVectors(new T.Vector3(0,1,0),n));
+          cgZoneId=tz.id;
+        }
+        cg.visible=true;
+        timerSprite.visible=true;
+        if(!cg.userData.lastT||t-cg.userData.lastT>1.5){
+          buildScaff(prog);
+          cg.add(timerSprite);
+          cg.add(readyRing);
+          cg.userData.lastT=t;
+        }
+        if(ready){
+          drawTimer("Construction terminée",true);
+          readyRing.material.opacity=.5+Math.sin(t*4)*.4;
+          readyRing.rotation.z=t*.8;
+        } else {
+          const h=Math.floor(remaining/3600),m=Math.floor((remaining%3600)/60),s=remaining%60;
+          const timeStr=h>0?h+"h "+m+"m":m>0?m+"m "+s+"s":s+"s";
+          drawTimer("Construction: "+timeStr,false);
+          readyRing.material.opacity=0;
+        }
+        cg.children.forEach((ch)=>{
+          if(ch.geometry&&ch.geometry.type==="SphereGeometry"&&ch.userData&&ch.userData.ph!==undefined){
+            const a=t*4+ch.userData.ph;
+            ch.position.set(Math.cos(a)*.05,((t*.4+ch.userData.ph)%1)*.13,Math.sin(a)*.05);
+            ch.material.opacity=.3+Math.sin(t*5+ch.userData.ph)*.4;
+          }
+          if(ch.geometry&&ch.geometry.type==="TorusGeometry"&&ch.position.y>.05&&ch.position.y<.12){
+            ch.rotation.z=t*.5;
+          }
+        });
+      }});
+    }
+    // Directional sunlight — positioned to match the visible sun sprite so lighting is consistent.
+    // The sun sprite sits at (cos(sunAngle)*sunDist, 1.5, sin(sunAngle)*sunDist) — use same direction.
+    const sun=new T.DirectionalLight(0xfff5e0,2.0);
+    sun.position.set(Math.cos(sunAngle)*sunDist,1.5,Math.sin(sunAngle)*sunDist);
+    scene.add(sun);
+    // Backlight: opposite side gets a softer bluish fill so the dark half is still visible
+    const back=new T.DirectionalLight(0x3a5a8a,.75);
+    back.position.set(-Math.cos(sunAngle)*sunDist,-1.5,-Math.sin(sunAngle)*sunDist);
+    scene.add(back);
+    // Overall ambient boost so space/starlight illuminates the unlit side
+    scene.add(new T.AmbientLight(0x283850,1.2));
+    dragRef.current.theta=stateRef.current.theta||0;dragRef.current.phi=stateRef.current.phi||Math.PI/2;
+    if(!dragRef.current.dist||dragRef.current.dist<0.1)dragRef.current.dist=CAM_START;
+    let t=stateRef.current.t||0,af;
+    const easeOut=x=>1-Math.pow(1-x,3);
+    const loop=()=>{
+      af=requestAnimationFrame(loop);t+=.004;
+      if(!introDone){
+        introT+=.016/INTRO_DUR;
+        if(introT>=1){introT=1;introDone=true;}
+        dragRef.current.dist=CAM_START+(CAM_END-CAM_START)*easeOut(introT);
+      }
+      // ===== BACKGROUND ANIMATIONS =====
+      // Nebula slow rotation
+      nebMesh.rotation.y=t*.006;
+      nebMesh.rotation.x=t*.003;
+      // Twinkle stars at different frequencies
+      starLayers.forEach(l=>{l.mat.opacity=l.baseOp*(0.8+0.2*Math.sin(t*l.freq+l.phase));});
+      bsMat.opacity=0.7+0.25*Math.sin(t*1.8);
+      // Distant planets subtle pulse
+      distPlanets.forEach(dp=>{dp.sprite.material.opacity=0.7+0.15*Math.sin(t*0.6+dp.phase);});
+      // Drift asteroids
+      const aPos=astGeo.attributes.position.array;
+      for(let i=0;i<astCount;i++){
+        aPos[i*3]+=astVel[i].vx;aPos[i*3+1]+=astVel[i].vy;aPos[i*3+2]+=astVel[i].vz;
+        const dist=Math.sqrt(aPos[i*3]**2+aPos[i*3+1]**2+aPos[i*3+2]**2);
+        if(dist>28||dist<12){astVel[i].vx*=-1;astVel[i].vy*=-1;astVel[i].vz*=-1;}
+      }
+      astGeo.attributes.position.needsUpdate=true;
+      // Comet spawning
+      nextPlanetCometAt-=0.016;
+      if(nextPlanetCometAt<=0&&comets.length<2){
+        makePlanetComet();
+        nextPlanetCometAt=8+Math.random()*15;
+      }
+      // Animate comets
+      for(let ci=comets.length-1;ci>=0;ci--){
+        const co=comets[ci];
+        co.progress+=co.speed;
+        if(co.progress>=1){
+          scene.remove(co.trailLine);scene.remove(co.head);
+          co.trail.dispose();comets.splice(ci,1);continue;
+        }
+        const px=co.start.x+(co.end.x-co.start.x)*co.progress;
+        const py=co.start.y+(co.end.y-co.start.y)*co.progress+Math.sin(co.progress*Math.PI)*6;
+        const pz=co.start.z+(co.end.z-co.start.z)*co.progress;
+        co.head.position.set(px,py,pz);
+        const tp=co.trail.attributes.position.array;
+        for(let j=co.trailLen-1;j>0;j--){tp[j*3]=tp[(j-1)*3];tp[j*3+1]=tp[(j-1)*3+1];tp[j*3+2]=tp[(j-1)*3+2];}
+        tp[0]=px;tp[1]=py;tp[2]=pz;
+        co.trail.attributes.position.needsUpdate=true;
+        const fade=co.progress<0.1?co.progress/0.1:co.progress>0.9?(1-co.progress)/0.1:1;
+        co.head.material.opacity=fade;co.trailLine.material.opacity=0.6*fade;
+      }
+      // ===== END BACKGROUND ANIMATIONS =====
+      const dr=dragRef.current;
+      if(!dr.on){dr.vTheta*=.94;dr.vPhi*=.94;dr.theta+=dr.vTheta;dr.phi+=dr.vPhi;}
+      // Orbit camera around the planet (stays at origin). Theta=longitude, Phi=polar angle.
+      // Normalize phi to [0, 2π] for continuous wrap; camera's "up" flips across poles.
+      const wrappedPhi=((dr.phi%(Math.PI*2))+Math.PI*2)%(Math.PI*2);
+      const camX=dr.dist*Math.sin(wrappedPhi)*Math.cos(dr.theta);
+      const camY=dr.dist*Math.cos(wrappedPhi);
+      const camZ=dr.dist*Math.sin(wrappedPhi)*Math.sin(dr.theta);
+      cam.position.set(camX,camY,camZ);
+      // Flip "up" direction when we're upside-down so the globe doesn't mirror/jitter at poles
+      cam.up.set(0,wrappedPhi<Math.PI?1:-1,0);
+      cam.lookAt(0,0,0);
+      // Planet is fixed — no rotation so continent click coords are 100% stable
+      mesh.rotation.y=0;
+      if(cloudMesh){cloudMesh.rotation.y=t*.02;}
+      moonMeshes.forEach(({mesh:m,dist,angle,speed,tilt})=>{const a=angle+t*speed;m.position.set(Math.cos(a)*dist,tilt,Math.sin(a)*dist);});
+      buildingAnims.forEach(({update})=>update(t));
+      // Project each continent's 3D centroid to screen coordinates for HTML overlay buttons.
+      // Only include labels that are on the FRONT-FACING hemisphere (visible to the camera).
+      if(isMyPlanet&&continents&&continents.length){
+        const W3=renderer.domElement.clientWidth,H3=renderer.domElement.clientHeight;
+        const newPositions=[];
+        const _v=new T.Vector3();
+        // Ensure mesh's world matrix is up-to-date for transforming continent points
+        mesh.updateMatrixWorld();
+        continents.forEach(function(cont){
+          const cLen=Math.sqrt(cont.cx*cont.cx+cont.cy*cont.cy+cont.cz*cont.cz)||1;
+          // Three.js SphereGeometry UV mapping: theta=0 at texture px=0 lands at world -X,
+          // not +X. So we must flip X and Z of the centroid (which was computed using the
+          // texture-painting convention) to match the actual 3D position on the rendered sphere.
+          const nx=-cont.cx/cLen,ny=cont.cy/cLen,nz=cont.cz/cLen;
+          _v.set(nx*1.05,ny*1.05,nz*1.05);
+          _v.applyMatrix4(mesh.matrixWorld);
+          const worldPointDir=new T.Vector3(nx,ny,nz).transformDirection(mesh.matrixWorld);
+          const camToPoint=new T.Vector3().subVectors(_v,cam.position).normalize();
+          const facing=worldPointDir.dot(camToPoint);
+          const visible=facing<0.1;
+          _v.project(cam);
+          const sx=(_v.x*0.5+0.5)*W3;
+          const sy=(-_v.y*0.5+0.5)*H3;
+          newPositions.push({id:cont.id,name:cont.name,color:cont.color,x:sx,y:sy,visible:visible&&_v.z<1});
+        });
+        // Only update state if positions changed meaningfully (avoid re-render spam)
+        const prev=contLabelPosRef.current;
+        let changed=prev.length!==newPositions.length;
+        if(!changed){
+          for(let i=0;i<newPositions.length;i++){
+            const a=newPositions[i],b=prev[i];
+            if(!b||Math.abs(a.x-b.x)>0.5||Math.abs(a.y-b.y)>0.5||a.visible!==b.visible){changed=true;break;}
+          }
+        }
+        if(changed){
+          contLabelPosRef.current=newPositions;
+          setContLabelPositions(newPositions);
+        }
+      }
+      // Also call _anim on building groups
+      markers.forEach(m=>{
+        if(m.userData&&m.userData._anim)m.userData._anim(t);
+        // Animate universal base LEDs (rim pulse + cardinal dots blinking)
+        if(m.userData&&m.userData._baseLEDs){
+          const led=m.userData._baseLEDs;
+          if(led.rim&&led.rim.material)led.rim.material.opacity=0.35+Math.sin(t*1.5)*0.35;
+          if(led.cardinals){
+            led.cardinals.forEach(c=>{
+              if(c.mesh&&c.mesh.material)c.mesh.material.opacity=0.3+Math.max(0,Math.sin(t*2.5+c.phase))*0.7;
+            });
+          }
+        }
+        // Animate particle systems (smoke/sparks for each building type)
+        if(m.userData&&m.userData._particles){
+          m.userData._particles.forEach(sys=>{
+            const opts=sys.opts;
+            // Spawn new particles at interval
+            if(t-sys.lastSpawn>opts.interval){
+              sys.lastSpawn=t;
+              // Find a dead particle to reuse
+              const dead=sys.particles.find(p=>t-p.born>p.life);
+              if(dead){
+                dead.born=t;
+                dead.life=opts.lifetime*(0.7+Math.random()*0.6);
+                const ang=Math.random()*Math.PI*2;
+                const rad=Math.random()*opts.radius;
+                dead.mesh.position.set(
+                  opts.origin[0]+Math.cos(ang)*rad,
+                  opts.origin[1],
+                  opts.origin[2]+Math.sin(ang)*rad
+                );
+                // Set velocity based on mode
+                if(opts.mode==="spark"){
+                  // Sparks fly outward and slightly up, then fall
+                  const sAng=Math.random()*Math.PI*2;
+                  const sSpeed=0.03+Math.random()*0.04;
+                  dead.vx=Math.cos(sAng)*sSpeed;
+                  dead.vz=Math.sin(sAng)*sSpeed;
+                  dead.vy=0.02+Math.random()*0.03;
+                }else{
+                  // Smoke rises with slight drift
+                  dead.vx=(Math.random()-0.5)*0.008;
+                  dead.vz=(Math.random()-0.5)*0.008;
+                  dead.vy=opts.upward?0.015+Math.random()*0.01:-0.008;
+                }
+                dead.mesh.visible=true;
+                dead.mesh.material.opacity=0;
+              }
+            }
+            // Update active particles
+            sys.particles.forEach(p=>{
+              const age=t-p.born;
+              if(age>p.life){
+                p.mesh.visible=false;
+                return;
+              }
+              const lifeRatio=age/p.life;
+              // Move particle
+              p.mesh.position.x+=p.vx;
+              p.mesh.position.y+=p.vy;
+              p.mesh.position.z+=p.vz;
+              // Gravity for sparks
+              if(opts.mode==="spark")p.vy-=0.0015;
+              // Fade in quickly, fade out slowly
+              const fadeIn=Math.min(1,lifeRatio*6);
+              const fadeOut=1-lifeRatio;
+              p.mesh.material.opacity=fadeIn*fadeOut*0.85;
+              // Smoke grows, sparks shrink
+              const scale=opts.mode==="spark"?(1-lifeRatio*0.5):(1+lifeRatio*1.5);
+              p.mesh.scale.setScalar(scale);
+            });
+          });
+        }
+      });
+      const currentQ=queueRef.current;
+      if(stateRef.current.scaffoldGroups){
+        stateRef.current.scaffoldGroups.forEach(sg=>{
+          const isActive=currentQ&&currentQ.type==="build"&&currentQ.id===sg.buildingId;
+          sg.group.visible=!!isActive;
+          if(isActive&&currentQ.startAt){
+            const prog=Math.max(0.05,Math.min(0.98,1-(currentQ.finishAt-Date.now())/(currentQ.finishAt-currentQ.startAt)));
+            sg.progressRing.scale.x=prog;sg.progressRing.scale.y=prog;
+            sg.progressRing.material.opacity=0.6+Math.sin(t*4)*0.3;
+          }
+        });
+      }
+      renderer.render(scene,cam);
+      stateRef.current.t=t;stateRef.current.theta=dr.theta;stateRef.current.phi=dr.phi;
+    };
+    loop();stateRef.current={renderer,mesh,markers,af};
+    // Multi-touch rotation: each pointer contributes its own delta independently.
+    // We SUM per-pointer movements and average by pointer count. This way:
+    //  - 1 finger dragging: works like single-touch
+    //  - 2 fingers moving in SAME direction: planet rotates (averaged, same speed)
+    //  - 2 fingers moving in OPPOSITE directions: each finger\'s delta still contributes
+    //    but they partially cancel (gives a subtle rotation from the larger/faster finger)
+    //  - 2 fingers where one stays still, other moves: planet rotates half-speed
+    const pointers=new Map(); // pointerId -> {x, y} (last known position for each finger)
+    function eventPointers(e){
+      const result=[];
+      if(e.touches&&e.touches.length>0){
+        for(let i=0;i<e.touches.length;i++){
+          const t=e.touches[i];
+          result.push({id:t.identifier,x:t.clientX,y:t.clientY});
+        }
+      }else if(e.clientX!==undefined){
+        result.push({id:"mouse",x:e.clientX,y:e.clientY});
+      }
+      return result;
+    }
+    const oD=e=>{
+      const dr=dragRef.current;
+      eventPointers(e).forEach(p=>pointers.set(p.id,{x:p.x,y:p.y}));
+      dr.on=true;dr.moved=false;dr.vx=0;dr.vy=0;
+      // Keep dr.x/dr.y for click-start reference (first pointer)
+      const first=eventPointers(e)[0];
+      if(first){dr.x=first.x;dr.y=first.y;}
+      // Init pinch distance when two fingers go down
+      if(e.touches&&e.touches.length>=2){
+        const dx=e.touches[0].clientX-e.touches[1].clientX;
+        const dy=e.touches[0].clientY-e.touches[1].clientY;
+        dr.pinchDist=Math.sqrt(dx*dx+dy*dy);
+        dr.moved=true; // prevent click after pinch
+      }
+    };
+    const oM=e=>{
+      const dr=dragRef.current;
+      // Pinch to zoom with two fingers
+      if(e.touches&&e.touches.length>=2){
+        const dx=e.touches[0].clientX-e.touches[1].clientX;
+        const dy=e.touches[0].clientY-e.touches[1].clientY;
+        const dist=Math.sqrt(dx*dx+dy*dy);
+        if(dr.pinchDist){
+          const delta=dr.pinchDist-dist;
+          // Scale: farther away = slower zoom; clamp to [1.5, 8]
+          dr.dist=Math.max(1.5,Math.min(8,dr.dist+delta*.012));
+        }
+        dr.pinchDist=dist;
+        dr.moved=true;
+        return;
+      }
+      if(!dr.on||pointers.size===0)return;
+      const evts=eventPointers(e);
+      // Compute per-pointer deltas, then average them for rotation
+      let sumDx=0,sumDy=0,n=0;
+      evts.forEach(p=>{
+        const prev=pointers.get(p.id);
+        if(prev){
+          sumDx+=(p.x-prev.x);
+          sumDy+=(p.y-prev.y);
+          n++;
+        }
+        pointers.set(p.id,{x:p.x,y:p.y});
+      });
+      if(n===0)return;
+      // Average the deltas (preserves natural single-finger speed)
+      const avgDx=sumDx/n,avgDy=sumDy/n;
+      // Track cumulative movement for click-vs-drag detection
+      if(Math.abs(avgDx)>1||Math.abs(avgDy)>1)dr.moved=true;
+      const dx=avgDx*.007,dy=avgDy*.007;
+      // Invert: dragging finger right should make the planet appear to rotate right,
+      // which means the camera orbits LEFT (negative theta). Same for vertical.
+      dr.vTheta=-dx;dr.vPhi=-dy;
+      dr.theta-=dx;
+      dr.phi-=dy;
+      // Keep dr.x/dr.y tracking first finger for click reference
+      if(evts[0]){dr.x=evts[0].x;dr.y=evts[0].y;}
+    };
+    const raycaster=new T.Raycaster();
+    const oU=e=>{
+      const dr=dragRef.current;
+      // Reset pinch tracking on any finger lift
+      dr.pinchDist=null;
+      // Remove pointers that were lifted
+      if(e.changedTouches){
+        for(let i=0;i<e.changedTouches.length;i++){
+          pointers.delete(e.changedTouches[i].identifier);
+        }
+      }else{
+        pointers.delete("mouse");
+      }
+      const wasOn=dr.on;
+      // Only end drag completely when ALL pointers are gone
+      if(pointers.size===0){
+        dr.on=false;
+      }else{
+        // Some pointers remain - rebase drag origin to their new centroid
+        const c=snapshotCenter();
+        if(c){dr.x=c.x;dr.y=c.y;}
+        return; // don\'t fire click logic while still dragging
+      }
+      if(wasOn&&!dr.moved&&isMyPlanet){
+        const rect=renderer.domElement.getBoundingClientRect();
+        const mx=((e.clientX-rect.left)/rect.width)*2-1,my=-((e.clientY-rect.top)/rect.height)*2+1;
+        raycaster.setFromCamera({x:mx,y:my},cam);
+        // Continent clicks are now handled by HTML overlay buttons (see render), not 3D raycast.
+        // Only zone markers (QG, buildings) are still 3D raycasted below.
+        if(markers.length>0){
+          const hits=raycaster.intersectObjects(markers,true);
+          if(hits.length>0){
+            let obj=hits[0].object;
+            while(obj&&!obj.userData.buildingId&&!obj.userData.isEmpty&&obj.parent)obj=obj.parent;
+            if(obj&&obj.userData){
+              if(obj.userData.buildingId&&onBuildingClick)onBuildingClick(obj.userData.buildingId,obj.userData.zoneId);
+              else if(obj.userData.isEmpty&&onZoneMarkerClick){const zi=obj.userData.zoneId;const zone=zonesRef.current&&zonesRef.current[zi];if(zone)onZoneMarkerClick(zone);}
+            }
+          }
+        }
+      }
+    };
+    renderer.domElement.addEventListener("mousedown",oD);
+    renderer.domElement.addEventListener("touchstart",oD,{passive:false});
+    renderer.domElement.addEventListener("mousemove",oM);
+    renderer.domElement.addEventListener("touchmove",oM,{passive:false});
+    renderer.domElement.addEventListener("mouseup",oU);
+    renderer.domElement.addEventListener("touchend",oU);
+    window.addEventListener("mousemove",oM);
+    window.addEventListener("mouseup",oU);
+    // Desktop mousewheel zoom
+    const onWheel=e=>{const dr=dragRef.current;dr.dist=Math.max(1.5,Math.min(8,dr.dist+e.deltaY*.003));e.preventDefault();};
+    renderer.domElement.addEventListener("wheel",onWheel,{passive:false});
+    renderer.domElement.style.touchAction="none";
+    const ro2=new ResizeObserver(()=>{const W2=div.clientWidth,H2=div.clientHeight;if(!W2||!H2)return;renderer.setSize(W2,H2);cam.aspect=W2/H2;cam.updateProjectionMatrix();});
+    ro2.observe(div);
+    window.addEventListener("orientationchange",()=>setTimeout(()=>{const W2=div.clientWidth,H2=div.clientHeight;if(!W2||!H2)return;renderer.setSize(W2,H2);cam.aspect=W2/H2;cam.updateProjectionMatrix();},150));
+    return()=>{cancelAnimationFrame(af);ro2.disconnect();renderer.domElement.removeEventListener("mousedown",oD);renderer.domElement.removeEventListener("touchstart",oD);renderer.domElement.removeEventListener("mousemove",oM);renderer.domElement.removeEventListener("touchmove",oM);renderer.domElement.removeEventListener("mouseup",oU);renderer.domElement.removeEventListener("touchend",oU);renderer.domElement.removeEventListener("wheel",onWheel);window.removeEventListener("mousemove",oM);window.removeEventListener("mouseup",oU);try{renderer.forceContextLoss&&renderer.forceContextLoss();}catch(e){}renderer.dispose();while(div.firstChild)div.removeChild(div.firstChild);};
+  },[planet,isMyPlanet]); // stable deps - zones/buildings via refs
+  return <div style={{width:"100%",height:"100%",position:"relative"}}>
+    <div ref={mountRef} style={{width:"100%",height:"100%",cursor:"grab"}}/>
+    {onContinentClick&&contLabelPositions.map(p=>{
+      const col=p.color||"#88bbdd";
+      return(
+        <button
+          key={p.id}
+          onClick={(e)=>{e.stopPropagation();onContinentClick(p.id);}}
+          onMouseDown={e=>e.stopPropagation()}
+          onTouchStart={e=>e.stopPropagation()}
+          style={{
+            position:"absolute",
+            left:p.x+"px",
+            top:p.y+"px",
+            transform:"translate(-50%,-50%)",
+            padding:0,
+            background:"transparent",
+            border:"none",
+            cursor:"pointer",
+            pointerEvents:p.visible?"auto":"none",
+            opacity:p.visible?1:0.25,
+            whiteSpace:"nowrap",
+            transition:"opacity 0.3s ease",
+            zIndex:20,
+            display:"flex",
+            flexDirection:"column",
+            alignItems:"center",
+            gap:0,
+            filter:p.visible?"drop-shadow(0 2px 8px rgba(0,0,0,0.7))":"none"
+          }}>
+          {/* Glowing LED dot in continent's color — the visual anchor */}
+          <div style={{
+            width:10,height:10,borderRadius:"50%",
+            background:col,
+            boxShadow:"0 0 8px "+col+",0 0 14px "+col+"88,inset 0 -1px 2px rgba(0,0,0,0.4)",
+            border:"1px solid rgba(255,255,255,0.4)",
+            marginBottom:3
+          }}/>
+          {/* Thin connector line */}
+          <div style={{width:1,height:6,background:"linear-gradient(to bottom,"+col+"cc,"+col+"00)"}}/>
+          {/* Label plate — always dark + white text for max readability */}
+          <div style={{
+            padding:"3px 10px",
+            background:"linear-gradient(180deg,rgba(10,18,32,0.92),rgba(4,10,20,0.95))",
+            color:"#ffffff",
+            border:"1px solid "+col+"aa",
+            borderLeftWidth:2,borderRightWidth:2,
+            borderRadius:3,
+            fontSize:10,
+            fontWeight:"bold",
+            letterSpacing:2,
+            fontFamily:"'Share Tech Mono',monospace",
+            textShadow:"0 1px 3px rgba(0,0,0,1)",
+            boxShadow:"0 0 10px "+col+"44,inset 0 0 6px rgba(0,0,0,0.5)",
+            backdropFilter:"blur(6px)",
+            WebkitBackdropFilter:"blur(6px)"
+          }}>
+            {(p.name||"").toUpperCase()}
+          </div>
+        </button>
+      );
+    })}
+  </div>;
+}
+function ZoneInfoModal({zone,onClose}){
+  if(!zone)return null;
+  const terrain=zone.terrain||{};
+  const bonuses=terrain.bonuses||{};
+  const bonusKeys=Object.keys(bonuses);
+  const bestBlds=BUILDINGS.filter(b=>{
+    if(b.id==="qg")return false;
+    if(!b.terrainBonus||!b.terrainBonus.includes(zone.type))return false;
+    const bonusKey=b.produces==="speed"?"buildSpeed":b.produces==="ships"?"shipCost":b.produces;
+    return!!(bonuses[bonusKey]);
+  });
+  const TERRAIN_ICONS={volcano:"🌋",mountain:"⛰️",forest:"🌲",coast:"🏖️",plain:"🌾",desert:"🏜️",tundra:"🧊",swamp:"🌿"};
+  const TERRAIN_DESC={
+    volcano:"Terrain volcanique riche en minerais. Idéal pour l'extraction de métal.",
+    mountain:"Relief montagneux avec des filons de minerais. Bon pour le métal et le cristal.",
+    forest:"Végétation dense riche en cristaux organiques.",
+    coast:"Zone côtière avec accès à l'eau. Excellent pour le deutérium.",
+    plain:"Terrain plat polyvalent, adapté à tous les bâtiments.",
+    desert:"Sol aride avec des dépôts de minerais en surface.",
+    tundra:"Permafrost riche en deutérium glacé.",
+    swamp:"Zone humide avec ressources mixtes en cristal et deutérium.",
+  };
+  const _rs0={position:"fixed",top:0,left:0,right:0,bottom:0,zIndex:9999,overflowY:"auto",WebkitOverflowScrolling:"touch",overscrollBehavior:"contain",background:"rgba(0,5,15,.85)",backdropFilter:"blur(6px)",WebkitBackdropFilter:"blur(6px)",display:"flex",alignItems:"flex-start",justifyContent:"center",padding:"4vh 12px"};
+  return(<div onClick={onClose} style={_rs0}>
+      <div onClick={e=>e.stopPropagation()} style={{width:"min(320px,94vw)",background:"linear-gradient(160deg,#07101f,#0a1628)",border:"1px solid #1a3050",borderRadius:16,padding:18,fontFamily:"monospace",color:"#9abcd8",boxShadow:"0 0 40px rgba(0,20,80,.9)"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+          <div style={{display:"flex",alignItems:"center",gap:10}}>
+            <span style={{fontSize:28}}>{TERRAIN_ICONS[zone.type]||"🗺️"}</span>
+            <div>
+              <div style={{fontSize:13,color:"#c8e0ff"}}>{zone.name}</div>
+              <div style={{fontSize:9,color:"#2a4a6a",marginTop:1}}>{terrain.name||zone.type}</div>
+            </div>
+          </div>
+          <button onClick={onClose} style={{background:"transparent",border:"none",color:"#2a4060",cursor:"pointer",fontSize:18}}>{"✕"}</button>
+        </div>
+        <div style={{fontSize:9,color:"#3a5a7a",lineHeight:1.6,marginBottom:12,padding:"7px 10px",borderRadius:8,background:"rgba(10,25,50,.4)",border:"1px solid #0d2035"}}>
+          {TERRAIN_DESC[zone.type]||"Zone de terrain disponible."}
+        </div>
+        <div style={{marginBottom:12}}>
+          <div style={{fontSize:8,color:"#1e3050",letterSpacing:2,marginBottom:6}}>{"BONUS DE ZONE"}</div>
+          {(()=>{const zoneKeys=bonusKeys.filter(k=>k.indexOf("qg")!==0);
+            if(zoneKeys.length===0)return(<div style={{fontSize:9,color:"#2a4a6a",padding:"5px 8px"}}>{"Aucun bonus de terrain"}</div>);
+            return zoneKeys.map(k=>{
+              const pct=Math.round(bonuses[k]*100);
+              const meta=k==="metal"?{col:"#ffaa44",ic:"⛏️",lbl:"production de métal",sign:"+"}
+                :k==="crystal"?{col:"#44ccff",ic:"💎",lbl:"production de cristal",sign:"+"}
+                :k==="deut"?{col:"#44ffaa",ic:"⚗️",lbl:"production de deutérium",sign:"+"}
+                :k==="energy"?{col:"#ffdd55",ic:"⚡",lbl:"production d'énergie",sign:"+"}
+                :k==="buildSpeed"?{col:"#aaccff",ic:"🤖",lbl:"vitesse de construction",sign:"−"}
+                :k==="shipCost"?{col:"#dca0ff",ic:"🚀",lbl:"coût des vaisseaux",sign:"−"}
+                :{col:"#9abcd8",ic:"◆",lbl:k,sign:"+"};
+              return(<div key={k} style={{display:"flex",alignItems:"center",gap:8,marginBottom:5,padding:"5px 8px",borderRadius:7,background:"rgba(15,35,70,.5)"}}>
+                  <span style={{fontSize:16}}>{meta.ic}</span>
+                  <div>
+                    <div style={{fontSize:11,color:meta.col,fontFamily:"monospace",fontWeight:"bold"}}>{meta.sign+pct+"%"}</div>
+                    <div style={{fontSize:8,color:"#2a4a6a"}}>{meta.lbl}</div>
+                  </div>
+                </div>);
+            });
+          })()}
+        </div>
+        {(()=>{const qgKeys=bonusKeys.filter(k=>k.indexOf("qg")===0);
+          if(qgKeys.length===0)return null;
+          const QG_LBL={qgStorage:{ic:"📦",lbl:"stockage global",col:"#9adda0"},
+            qgProdAll:{ic:"⚡",lbl:"production toutes ressources",col:"#ffcc70"},
+            qgBuildCost:{ic:"🏗️",lbl:"coût de construction",col:"#aaccff"},
+            qgShipCost:{ic:"🚀",lbl:"coût des vaisseaux",col:"#dca0ff"},
+            qgEnergy:{ic:"☀️",lbl:"production d'énergie",col:"#ffdd55"},
+            qgFleetSpeed:{ic:"💨",lbl:"vitesse de flotte",col:"#88e0ff"},
+            qgDeutStorage:{ic:"⚗️",lbl:"stockage de deutérium",col:"#7adda0"},
+            qgCrystalProd:{ic:"💎",lbl:"production de cristal",col:"#7adfe8"}};
+          return(<div style={{marginBottom:12}}>
+            <div style={{fontSize:8,color:"#1e3050",letterSpacing:2,marginBottom:6}}>{"BONUS SI QG ICI"}</div>
+            {qgKeys.map(k=>{
+              const pct=Math.round(bonuses[k]*100);
+              const meta=QG_LBL[k]||{ic:"★",lbl:k,col:"#9adda0"};
+              const sign=k==="qgBuildCost"||k==="qgShipCost"?"−":"+";
+              return(<div key={k} style={{display:"flex",alignItems:"center",gap:8,marginBottom:5,padding:"5px 8px",borderRadius:7,background:"rgba(40,30,60,.5)",border:"1px solid rgba(100,80,160,.3)"}}>
+                <span style={{fontSize:16}}>{meta.ic}</span>
+                <div>
+                  <div style={{fontSize:11,color:meta.col,fontFamily:"monospace",fontWeight:"bold"}}>{sign+pct+"%"}</div>
+                  <div style={{fontSize:8,color:"#6a5a8a"}}>{meta.lbl}</div>
+                </div>
+              </div>);
+            })}
+          </div>);
+        })()}
+        {bestBlds.length>0&&(
+          <div>
+            <div style={{fontSize:8,color:"#1e3050",letterSpacing:2,marginBottom:6}}>{"BÂTIMENTS CONSEILLÉS"}</div>
+            {bestBlds.map(b=>{
+              const keyFor=b.produces==="speed"?"buildSpeed":b.produces==="ships"?"shipCost":b.produces;
+              const bv=bonuses[keyFor];
+              const sign=keyFor==="buildSpeed"||keyFor==="shipCost"?"−":"+";
+              return(<div key={b.id} style={{display:"flex",alignItems:"center",gap:8,marginBottom:4,padding:"5px 8px",borderRadius:7,background:"rgba(10,40,20,.4)",border:"1px solid #1a3a20"}}>
+                  <span style={{fontSize:14}}>{b.icon}</span>
+                  <div style={{flex:1}}>
+                    <div style={{fontSize:10,color:"#7ad8a0"}}>{b.name}</div>
+                    {bv&&<div style={{fontSize:8,color:"#3a7a54"}}>{"✓ "+sign+Math.round(bv*100)+"% sur ce terrain"}</div>}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function BuildingInfoModal({bld,zone,lv,state,planet,onUpgrade,onClose}){
+  if(!bld||!zone)return null;
+  const cost=bCost(bld,lv,planet);
+  const canUp=canAfford(state.resources,cost)&&!state.queue;
+  const rl=state.buildings.usine_robots||0;
+  const secs=bTime(bld,lv,rl,planet,state,state&&state.zones);
+  const isBonus=(bld.terrainBonus&&bld.terrainBonus.includes(zone.type));
+  const tb=getTerrainBonuses(state.zones||[],planet);
+  const bon=tb[bld.produces]||0;
+  const prodInfo=bld.produces==="metal"?fmt(prodH(lv,30,bon,state,"metal"))+"/h metal":
+    bld.produces==="crystal"?fmt(prodH(lv,20,bon,state,"crystal"))+"/h cristal":
+    bld.produces==="deut"?fmt(prodH(lv,10,bon,state,"deut"))+"/h deuterium":
+    bld.produces==="energy"?"E "+fmt(eProd(lv,planet,state,state&&state.zones))+" energie":
+    bld.produces==="speed"?"x"+(lv+1)+" vitesse":"Niveau "+lv;
+  const _rs1={position:"fixed",top:0,left:0,right:0,bottom:0,zIndex:9999,overflowY:"auto",WebkitOverflowScrolling:"touch",overscrollBehavior:"contain",background:"rgba(0,5,15,.85)",backdropFilter:"blur(6px)",WebkitBackdropFilter:"blur(6px)"};
+  return(<div onClick={onClose} style={_rs1}>
+      <div onClick={e=>e.stopPropagation()} style={{width:"min(340px,94vw)",margin:"4vh auto",background:"linear-gradient(160deg,#07101f,#0a1628)",border:"1px solid #1a3050",borderRadius:16,padding:20,fontFamily:"monospace",color:"#9abcd8",boxShadow:"0 0 40px rgba(0,20,80,.9)"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+          <div style={{display:"flex",alignItems:"center",gap:10}}>
+            <span style={{fontSize:28}}>{(BUILDINGS.find(b=>b.id===bld.id)&&BUILDINGS.find(b=>b.id===bld.id).icon)}</span>
+            <div>
+              <div style={{fontSize:13,color:"#c8e0ff"}}>{bld.name}</div>
+              <div style={{fontSize:9,color:"#2a4a6a"}}>{(zone.terrain&&zone.terrain.icon)} {zone.name}</div>
+            </div>
+          </div>
+          <button onClick={onClose} style={{background:"transparent",border:"none",color:"#2a4060",cursor:"pointer",fontSize:18}}>✕</button>
+        </div>
+        <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14,padding:"8px 12px",borderRadius:10,background:"rgba(10,25,60,.5)",border:"1px solid #0d2035"}}>
+          <div style={{fontSize:24,fontWeight:"bold",color:"#4a8adf",fontFamily:"'Share Tech Mono',monospace"}}>Niv.{lv}</div>
+          <div>
+            <div style={{fontSize:11,color:bon>0?"#40c870":"#6a9ab8"}}>{prodInfo}{bon>0&&" ✓ bonus terrain"}</div>
+            {isBonus&&<div style={{fontSize:9,color:"#3a7a54",marginTop:2}}>+{Math.round((bon)*100)}% bonus actif</div>}
+          </div>
+        </div>
+        <div style={{fontSize:9,color:"#1e3050",letterSpacing:1,marginBottom:8}}>AMÉLIORATION → NIV.{lv+1}</div>
+        <div style={{fontSize:10,color:bon>0?"#40c870":"#6a9ab8",marginBottom:8}}>
+          {bld.produces==="metal"?"+"+fmt(prodH(lv+1,30,bon))+"/h":
+           bld.produces==="crystal"?"+"+fmt(prodH(lv+1,20,bon))+"/h":
+           bld.produces==="deut"?"+"+fmt(prodH(lv+1,10,bon))+"/h":
+           bld.produces==="energy"?"E+"+fmt(eProd(lv+1,planet,state,state&&state.zones)):
+           bld.produces==="speed"?"x"+(lv+2)+" vit":"Niv."+(lv+1)}
+        </div>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:12,fontSize:10}}>
+          {cost.metal>0&&<span style={{color:state.resources.metal>=cost.metal?"#7090b8":"#803030"}}>⛏️ {fmt(cost.metal)}</span>}
+          {cost.crystal>0&&<span style={{color:state.resources.crystal>=cost.crystal?"#40a8c8":"#803030"}}>💎 {fmt(cost.crystal)}</span>}
+          {cost.deut>0&&<span style={{color:state.resources.deut>=cost.deut?"#40c890":"#803030"}}>⚗️ {fmt(cost.deut)}</span>}
+          <span style={{color:"#2a4060",marginLeft:"auto"}}>⏱ {fmtT(secs)}</span>
+        </div>
+        {state.queue&&<div style={{fontSize:9,color:"#e08030",marginBottom:8,textAlign:"center"}}>⚠ File de construction occupée</div>}
+        <button onClick={()=>{if(canUp){onUpgrade(bld,lv);onClose();}}} disabled={!canUp}
+          style={{width:"100%",padding:"9px 0",borderRadius:8,border:"none",cursor:canUp?"pointer":"not-allowed",background:canUp?"linear-gradient(135deg,#1a5080,#0d3060)":"#0a1828",color:canUp?"#88ccff":"#1e3050",fontSize:10,fontFamily:"'Share Tech Mono',monospace",letterSpacing:1}}>
+          {state.queue?"FILE OCCUPÉE":!canAfford(state.resources,cost)?"RESSOURCES INSUFFISANTES":"⬆ AMÉLIORER"}
+        </button>
+      </div>
+    </div>
+  );
+}
+    const _vs1={width:"100%",padding:"6px",borderRadius:7,border:"none",cursor:"pointer",background:"linear-gradient(135deg,#1a4070,#0d2860)",color:"#77aadd",fontFamily:"monospace",fontSize:9};
+  const _vs2={display:"flex",justifyContent:"space-between",fontSize:9,padding:"2px 0",borderBottom:"1px solid #050d18"};
+  const _vs3={marginBottom:4,padding:"5px 8px",borderRadius:7,background:"rgba(8,14,28,0.8)",border:"1px solid #0a1828",cursor:"pointer",display:"flex",alignItems:"center",gap:6};
+  const _vs4={width:"100%",padding:"10px 0",borderRadius:6,border:"1px solid #2a5090",cursor:"pointer",background:"linear-gradient(180deg,rgba(30,70,140,0.4),rgba(15,40,90,0.6))",color:"#9abcd8",fontFamily:"monospace",fontSize:10,letterSpacing:2,fontWeight:"bold",transition:"all 0.15s"};
+  const _vs5={width:"100%",padding:"8px 0",borderRadius:6,border:"1px solid #1a4060",cursor:"pointer",background:"rgba(15,25,45,0.5)",color:"#6a8ab0",fontFamily:"monospace",fontSize:9,letterSpacing:2};
+// ──────────────────────────────────────────────────────
+// Modal showing all active missions/quests
+// ──────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────
+// PLAYER AVATAR — clickable circle with initials
+// ──────────────────────────────────────────────────────
+function PlayerAvatar({name,state,size=34,onClick,showGlow}){
+  const profile=getProfile(state,name);
+  const col=getColorHex(profile.colorId);
+  const content=getAvatarContent(profile,name,state);
+  const bg=getAvatarBackground(profile,col);
+  const borderStyle=getAvatarBorderStyle(profile,col);
+  const effectShadow=getAvatarEffectShadow(profile,col);
+  const effectAnim=getAvatarEffectAnimation(profile);
+  const isSymbolic=isAvatarSymbolic(profile);
+  const contentItem=AVATAR_CONTENTS.find(x=>x.id===profile.avatarContent);
+  const isInitials=contentItem&&contentItem.id==="initials";
+  // Combine shadows (border's extra + effect)
+  const shadows=[];
+  if(borderStyle.extraShadow)shadows.push(borderStyle.extraShadow);
+  if(effectShadow)shadows.push(effectShadow);
+  if(showGlow&&shadows.length===0)shadows.push("0 0 12px "+col+"aa, inset 0 0 8px "+col+"22");
+  else if(shadows.length===0)shadows.push("0 0 6px "+col+"44");
+  return(
+    <button onClick={onClick} style={{
+      width:size,height:size,
+      borderRadius:"50%",
+      border:borderStyle.border,
+      background:bg,
+      color:col,
+      fontSize:Math.round(size*(isInitials?0.4:isSymbolic?0.55:0.5)),
+      fontFamily:"'Share Tech Mono',monospace",
+      fontWeight:"bold",
+      letterSpacing:isInitials?1:0,
+      cursor:onClick?"pointer":"default",
+      display:"flex",
+      alignItems:"center",
+      justifyContent:"center",
+      padding:0,
+      boxShadow:shadows.join(", "),
+      animation:[borderStyle.anim,effectAnim].filter(Boolean).join(", "),
+      transition:"all 0.2s",
+      flexShrink:0,
+    }}>
+      {content}
+    </button>
+  );
+}
+
+// ──────────────────────────────────────────────────────
+// LOCKED COSMETIC MODAL — shows how to unlock a cosmetic
+// ──────────────────────────────────────────────────────
+function LockedCosmeticModal({item,onClose}){
+  if(!item)return null;
+  const mission=findCosmeticSourceMission(item.category,item.itemId);
+  const display=getCosmeticDisplay(item.category,item.itemId);
+  const categoryColors={color:"#d4a850",banner:"#9370db",content:"#4a9adf",background:"#50c878",border:"#e8749e",effect:"#4abfbf"};
+  const accent=categoryColors[item.category]||"#9abcd8";
+  return(<div onClick={onClose} style={{position:"fixed",top:0,left:0,right:0,bottom:0,zIndex:900,background:"rgba(0,5,15,0.9)",backdropFilter:"blur(8px)",display:"flex",alignItems:"center",justifyContent:"center",padding:20,fontFamily:"monospace"}}>
+    <div onClick={e=>e.stopPropagation()} style={{width:320,maxWidth:"100%",background:"linear-gradient(160deg,#0a101e,#12182a)",border:"1px solid "+accent+"66",borderRadius:12,padding:22,color:"#9abcd8",boxShadow:"0 0 40px "+accent+"44"}}>
+      <div style={{textAlign:"center",marginBottom:14}}>
+        <div style={{fontSize:42,marginBottom:8}}>{"🔒"}</div>
+        <div style={{fontSize:10,color:accent,letterSpacing:2,fontWeight:"bold"}}>COSMÉTIQUE VERROUILLÉ</div>
+      </div>
+      {display&&(
+        <div style={{textAlign:"center",marginBottom:14,padding:"10px 12px",borderRadius:8,background:"rgba(8,16,30,0.6)",border:"1px solid #1a3050"}}>
+          <div style={{fontSize:8,color:"#5a7aa0",letterSpacing:1.5,marginBottom:4}}>{display.typeLabel.toUpperCase()}</div>
+          <div style={{fontSize:14,color:"#c8e0ff",fontWeight:"bold"}}>{(display.display?display.display+" ":"")+display.name}</div>
+        </div>
+      )}
+      {mission?(
+        <div style={{padding:"12px 14px",borderRadius:8,background:"rgba(20,40,80,0.3)",border:"1px solid "+accent+"44",marginBottom:14}}>
+          <div style={{fontSize:8,color:accent,letterSpacing:1.5,marginBottom:5}}>{"🎯 COMMENT DÉBLOQUER"}</div>
+          <div style={{fontSize:12,color:"#c8e0ff",fontWeight:"bold",marginBottom:4}}>{mission.icon+" "+mission.title}</div>
+          <div style={{fontSize:10,color:"#8aa8cc",lineHeight:1.5}}>{mission.desc}</div>
+        </div>
+      ):(
+        <div style={{padding:"10px 12px",borderRadius:8,background:"rgba(60,30,30,0.3)",border:"1px solid #603030",marginBottom:14,fontSize:10,color:"#caa0a0",textAlign:"center"}}>
+          {"Ce cosmétique n'est actuellement lié à aucune mission."}
+        </div>
+      )}
+      <button onClick={onClose} style={{width:"100%",padding:"10px 16px",borderRadius:6,background:"rgba(20,40,80,0.6)",border:"1px solid #1a4060",color:"#c8e0ff",fontSize:10,cursor:"pointer",fontFamily:"monospace",letterSpacing:2,fontWeight:"bold"}}>{"FERMER"}</button>
+    </div>
+  </div>);
+}
+
+// ──────────────────────────────────────────────────────
+// PROFILE MODAL — view + customize player identity
+// ──────────────────────────────────────────────────────
+function EmpireModal({userId,planets,natalIdx,activePlanetIdx,onSwitch,onClose,inline,onScroll}){
+  const natSt=loadGS(userId);
+  const empire=(natSt&&natSt.empire)||[];
+  const qgLv=(natSt&&natSt.buildings&&natSt.buildings.qg)||0;
+  const maxCol=maxColoniesFor(qgLv);
+  // Build the list: natal first, then colonies
+  const items=[{idx:natalIdx,planet:planets[natalIdx],state:natSt,isNatal:true}];
+  empire.forEach(i=>{
+    const s=loadColony(userId,i);
+    if(s)items.push({idx:i,planet:planets[i],state:s,isNatal:false});
+  });
+  const currentActive=activePlanetIdx===null?natalIdx:activePlanetIdx;
+  return(
+    inline?(
+      <div style={{flex:1,display:"flex",flexDirection:"column",fontFamily:"monospace",overflow:"hidden",paddingTop:8,paddingBottom:0}}>
+        <div onScroll={onScroll} style={{flex:1,overflowY:"auto",WebkitOverflowScrolling:"touch",overscrollBehavior:"contain",padding:"10px 12px 90px"}}>
+          <div style={{fontSize:11,color:"#c8e0ff",fontFamily:"monospace",letterSpacing:2,fontWeight:"bold",marginBottom:4,padding:"0 4px"}}>{"🏛️ MON EMPIRE"}</div>
+          <div style={{fontSize:9,color:"#6a8ab0",fontFamily:"monospace",marginBottom:10,padding:"0 4px"}}>{items.length+" / "+(maxCol+1)+" planète"+(items.length>1?"s":"")+" · QG Niv "+qgLv}</div>
+          {items.map(it=>{
+            const[c]=gc(it.planet.type);
+            const isActive=it.idx===currentActive;
+            const res=(it.state&&it.state.resources)||{};
+            const bCount=it.state&&it.state.buildings?Object.values(it.state.buildings).filter(v=>v>0).length:0;
+            return(
+              <div key={it.idx} onClick={()=>{if(!isActive){onSwitch(it.isNatal?null:it.idx);onClose&&onClose();}}} style={{padding:"10px 12px",marginBottom:6,borderRadius:7,border:"1px solid "+(isActive?"#d4a850":"#1a3050"),background:isActive?"linear-gradient(135deg,rgba(100,70,20,0.3),rgba(60,40,10,0.4))":"rgba(8,16,30,0.7)",cursor:isActive?"default":"pointer",display:"flex",alignItems:"center",gap:10}}>
+                <div style={{width:12,height:12,borderRadius:"50%",background:c,flexShrink:0,boxShadow:"0 0 6px "+c+"88"}}/>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+                    <span style={{fontSize:11,color:isActive?"#ffd080":"#c8e0ff",fontFamily:"monospace",letterSpacing:1,fontWeight:"bold"}}>{(it.state&&it.state.planetName)||it.planet.name}</span>
+                    {it.isNatal&&<span style={{fontSize:7,padding:"1px 5px",borderRadius:3,background:"rgba(255,215,0,0.2)",border:"1px solid rgba(255,215,0,0.4)",color:"#ffd080",letterSpacing:1,fontWeight:"bold"}}>{"NATALE"}</span>}
+                    {!it.isNatal&&<span style={{fontSize:7,padding:"1px 5px",borderRadius:3,background:"rgba(100,180,240,0.2)",border:"1px solid rgba(100,180,240,0.4)",color:"#aaccee",letterSpacing:1,fontWeight:"bold"}}>{"COLONIE"}</span>}
+                    {isActive&&<span style={{fontSize:7,padding:"1px 5px",borderRadius:3,background:"rgba(212,168,80,0.25)",border:"1px solid rgba(212,168,80,0.5)",color:"#ffd080",letterSpacing:1,fontWeight:"bold"}}>{"★ ACTIVE"}</span>}
+                  </div>
+                  <div style={{fontSize:8,color:"#6a8ab0",fontFamily:"monospace",marginTop:3}}>{it.planet.type+" · "+bCount+" bât."}</div>
+                  <div style={{fontSize:8,color:"#88a0c0",fontFamily:"monospace",marginTop:2}}>{"⛏️ "+fmt(Math.floor(res.metal||0))+" · 💎 "+fmt(Math.floor(res.crystal||0))+" · ⚗️ "+fmt(Math.floor(res.deut||0))}</div>
+                </div>
+                {!isActive&&<div style={{fontSize:10,color:"#5a7aa0",fontFamily:"monospace",letterSpacing:1}}>{"GÉRER →"}</div>}
+              </div>
+            );
+          })}
+          {empire.length<maxCol?(
+            <div style={{marginTop:10,padding:"8px 12px",background:"rgba(30,50,90,0.25)",border:"1px dashed #2a4060",borderRadius:6,fontSize:9,color:"#7a9ac0",textAlign:"center",fontFamily:"monospace"}}>{"🌱 "+(maxCol-empire.length)+" emplacement"+(maxCol-empire.length>1?"s":"")+" de colonie disponible"+(maxCol-empire.length>1?"s":"")}</div>
+          ):maxCol>0?(
+            <div style={{marginTop:10,padding:"8px 12px",background:"rgba(50,40,20,0.3)",border:"1px dashed #604a20",borderRadius:6,fontSize:9,color:"#b89858",textAlign:"center",fontFamily:"monospace"}}>{"🏆 Limite atteinte · Monte ton QG pour en débloquer plus"}</div>
+          ):(
+            <div style={{marginTop:10,padding:"8px 12px",background:"rgba(50,30,30,0.3)",border:"1px dashed #604040",borderRadius:6,fontSize:9,color:"#c88080",textAlign:"center",fontFamily:"monospace"}}>{"🔒 QG Niv 5 requis pour coloniser"}</div>
+          )}
+        </div>
+      </div>
+    ):(
+    <div style={{position:"fixed",inset:0,background:"rgba(0,5,15,0.92)",zIndex:400,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={onClose}>
+      <div onClick={e=>e.stopPropagation()} style={{width:"min(520px,100%)",maxHeight:"90vh",overflowY:"auto",WebkitOverflowScrolling:"touch",background:"linear-gradient(180deg,rgba(10,20,40,0.98),rgba(6,14,28,0.98))",border:"1px solid #1a3a60",borderRadius:10,boxShadow:"0 0 40px rgba(30,80,160,0.3)"}}>
+        <div style={{padding:"14px 16px",borderBottom:"1px solid #0d2035",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+          <div>
+            <div style={{fontSize:13,color:"#c8e0ff",fontFamily:"monospace",letterSpacing:2,fontWeight:"bold"}}>{"🏛️ MON EMPIRE"}</div>
+            <div style={{fontSize:9,color:"#6a8ab0",fontFamily:"monospace",marginTop:2}}>{items.length+" / "+(maxCol+1)+" planète"+(items.length>1?"s":"")+" · QG Niv "+qgLv}</div>
+          </div>
+          <button onClick={onClose} style={{background:"rgba(0,0,0,0.4)",border:"1px solid rgba(255,255,255,0.3)",color:"#fff",cursor:"pointer",fontSize:11,padding:"4px 10px",borderRadius:4,fontFamily:"monospace",letterSpacing:2}}>{"FERMER ×"}</button>
+        </div>
+        <div style={{padding:"10px 12px"}}>
+          {items.map(it=>{
+            const[c]=gc(it.planet.type);
+            const isActive=it.idx===currentActive;
+            const res=(it.state&&it.state.resources)||{};
+            const bCount=it.state&&it.state.buildings?Object.values(it.state.buildings).filter(v=>v>0).length:0;
+            return(
+              <div key={it.idx} onClick={()=>{if(!isActive){onSwitch(it.isNatal?null:it.idx);onClose();}}} style={{padding:"10px 12px",marginBottom:6,borderRadius:7,border:"1px solid "+(isActive?"#d4a850":"#1a3050"),background:isActive?"linear-gradient(135deg,rgba(100,70,20,0.3),rgba(60,40,10,0.4))":"rgba(8,16,30,0.7)",cursor:isActive?"default":"pointer",display:"flex",alignItems:"center",gap:10}}>
+                <div style={{width:12,height:12,borderRadius:"50%",background:c,flexShrink:0,boxShadow:"0 0 6px "+c+"88"}}/>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+                    <span style={{fontSize:11,color:isActive?"#ffd080":"#c8e0ff",fontFamily:"monospace",letterSpacing:1,fontWeight:"bold"}}>{(it.state&&it.state.planetName)||it.planet.name}</span>
+                    {it.isNatal&&<span style={{fontSize:7,padding:"1px 5px",borderRadius:3,background:"rgba(255,215,0,0.2)",border:"1px solid rgba(255,215,0,0.4)",color:"#ffd080",letterSpacing:1,fontWeight:"bold"}}>{"NATALE"}</span>}
+                    {!it.isNatal&&<span style={{fontSize:7,padding:"1px 5px",borderRadius:3,background:"rgba(100,180,240,0.2)",border:"1px solid rgba(100,180,240,0.4)",color:"#aaccee",letterSpacing:1,fontWeight:"bold"}}>{"COLONIE"}</span>}
+                    {isActive&&<span style={{fontSize:7,padding:"1px 5px",borderRadius:3,background:"rgba(212,168,80,0.25)",border:"1px solid rgba(212,168,80,0.5)",color:"#ffd080",letterSpacing:1,fontWeight:"bold"}}>{"★ ACTIVE"}</span>}
+                  </div>
+                  <div style={{fontSize:8,color:"#6a8ab0",fontFamily:"monospace",marginTop:3}}>{it.planet.type+" · "+bCount+" bât."}</div>
+                  <div style={{fontSize:8,color:"#88a0c0",fontFamily:"monospace",marginTop:2}}>{"⛏️ "+fmt(Math.floor(res.metal||0))+" · 💎 "+fmt(Math.floor(res.crystal||0))+" · ⚗️ "+fmt(Math.floor(res.deut||0))}</div>
+                </div>
+                {!isActive&&<div style={{fontSize:10,color:"#5a7aa0",fontFamily:"monospace",letterSpacing:1}}>{"GÉRER →"}</div>}
+              </div>
+            );
+          })}
+          {/* Hint for expansion */}
+          {empire.length<maxCol?(
+            <div style={{marginTop:10,padding:"8px 12px",background:"rgba(30,50,90,0.25)",border:"1px dashed #2a4060",borderRadius:6,fontSize:9,color:"#7a9ac0",textAlign:"center",fontFamily:"monospace"}}>{"🌱 "+(maxCol-empire.length)+" emplacement"+(maxCol-empire.length>1?"s":"")+" de colonie disponible"+(maxCol-empire.length>1?"s":"")}</div>
+          ):maxCol>0?(
+            <div style={{marginTop:10,padding:"8px 12px",background:"rgba(50,40,20,0.3)",border:"1px dashed #604a20",borderRadius:6,fontSize:9,color:"#b89858",textAlign:"center",fontFamily:"monospace"}}>{"🏆 Limite atteinte · Monte ton QG pour en débloquer plus"}</div>
+          ):(
+            <div style={{marginTop:10,padding:"8px 12px",background:"rgba(50,30,30,0.3)",border:"1px dashed #604040",borderRadius:6,fontSize:9,color:"#c88080",textAlign:"center",fontFamily:"monospace"}}>{"🔒 QG Niv 5 requis pour coloniser"}</div>
+          )}
+        </div>
+      </div>
+    </div>)
+  );
+}
+
+function ProfileModal({user,state,onStateChange,onClose}){
+  const [size,setSize]=useState(()=>{const vv=window.visualViewport;return{w:vv?vv.width:window.innerWidth,h:vv?vv.height:window.innerHeight};});
+  useEffect(()=>{
+    const on=()=>{const vv=window.visualViewport;setSize({w:vv?vv.width:window.innerWidth,h:vv?vv.height:window.innerHeight});};
+    window.addEventListener("resize",on);
+    if(window.visualViewport)window.visualViewport.addEventListener("resize",on);
+    return()=>{window.removeEventListener("resize",on);if(window.visualViewport)window.visualViewport.removeEventListener("resize",on);};
+  },[]);
+  const [tab,setTab]=useState("overview");
+  const [quoteDraft,setQuoteDraft]=useState("");
+  const [lockedItem,setLockedItem]=useState(null);
+  const profile=getProfile(state,user.name);
+  useEffect(()=>{setQuoteDraft(profile.quote||"");},[profile.quote]);
+  const col=getColorHex(profile.colorId);
+  const banner=getBannerGradient(profile.bannerId);
+  const titles=state&&state.titles||[];
+  const bb=getBranchBonus(state);
+  const missionsDone=(state&&state.missionsClaimed||[]).length;
+  const missionsTotal=MISSIONS.length;
+  const buildingsTotal=state&&state.buildings?Object.values(state.buildings).reduce((a,b)=>a+b,0):0;
+  const shipsTotal=state&&state.ships?Object.values(state.ships).reduce((a,b)=>a+b,0):0;
+  const planetsVisited=(state&&state.missionFlags&&state.missionFlags.visitedPlanetCount)||0;
+  const updateProfile=(changes)=>{
+    if(!onStateChange)return;
+    const newProfile={...profile,...changes};
+    onStateChange({...state,profile:newProfile});
+  };
+  return(<div onClick={onClose} style={{position:"fixed",top:0,left:0,right:0,bottom:0,zIndex:700,background:"rgba(0,5,15,0.88)",backdropFilter:"blur(10px)",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"monospace",overflow:"auto",padding:12}}>
+    <div onClick={e=>e.stopPropagation()} style={{width:580,maxWidth:"100%",maxHeight:"96vh",overflow:"auto",WebkitOverflowScrolling:"touch",background:"linear-gradient(160deg,#07101f,#0a1628)",border:"1px solid #1a3050",borderRadius:14,fontFamily:"monospace",color:"#9abcd8",boxShadow:"0 0 60px rgba(0,20,80,0.9)"}}>
+      {/* Banner with avatar + name + title all inside */}
+      <div style={{position:"relative",minHeight:100,borderRadius:"14px 14px 0 0",overflow:"hidden"}}>
+        {/* Banner background with decorations */}
+        <div style={{position:"absolute",inset:0,background:banner}}>
+          <div style={{position:"absolute",inset:0,background:"radial-gradient(circle at 20% 30%,rgba(255,255,255,0.15),transparent 60%),radial-gradient(circle at 80% 60%,rgba(255,255,255,0.1),transparent 50%)"}}/>
+          {/* Bottom fade for readability */}
+          <div style={{position:"absolute",left:0,right:0,bottom:0,height:"70%",background:"linear-gradient(180deg,transparent,rgba(0,0,0,0.5))"}}/>
+        </div>
+        {/* Close button */}
+        <button onClick={onClose} style={{position:"absolute",top:10,right:10,background:"rgba(0,0,0,0.4)",border:"1px solid rgba(255,255,255,0.3)",color:"#fff",cursor:"pointer",fontSize:11,padding:"4px 10px",borderRadius:4,fontFamily:"monospace",letterSpacing:2,zIndex:10}}>{"FERMER ×"}</button>
+        {/* Avatar + info row */}
+        <div style={{position:"relative",display:"flex",alignItems:"center",gap:14,padding:"14px 16px",zIndex:2}}>
+          <div style={{flexShrink:0}}>
+            <PlayerAvatar name={user.name} state={state} size={64} showGlow={true}/>
+          </div>
+          <div style={{flex:1,minWidth:0}}>
+            <div style={{fontSize:16,color:"#fff",fontWeight:"bold",letterSpacing:2,marginBottom:4,textShadow:"0 1px 4px rgba(0,0,0,0.8)"}}>{user.name}</div>
+            <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+              <span style={{fontSize:9,color:"#fff",padding:"2px 7px",borderRadius:3,background:col+"44",border:"1px solid "+col+"88",letterSpacing:1.2,fontWeight:"bold",textShadow:"0 1px 2px rgba(0,0,0,0.6)"}}>{"🏆 "+(profile.activeTitle||"Commandant")}</span>
+              {bb&&<span style={{fontSize:9,color:"#fff",padding:"2px 7px",borderRadius:3,background:bb.color+"44",border:"1px solid "+bb.color+"88",letterSpacing:1.2,fontWeight:"bold",textShadow:"0 1px 2px rgba(0,0,0,0.6)"}}>{bb.icon+" "+bb.name}</span>}
+            </div>
+            {profile.quote&&<div style={{fontSize:9,color:"#e8f0ff",fontStyle:"italic",marginTop:6,textShadow:"0 1px 2px rgba(0,0,0,0.6)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{"« "+profile.quote+" »"}</div>}
+          </div>
+        </div>
+      </div>
+      {/* Tabs */}
+      <div style={{display:"flex",borderBottom:"1px solid #1a3050",background:"rgba(4,10,22,0.85)"}}>
+        {[{id:"overview",i:"📊",l:"APERÇU"},{id:"titles",i:"🏆",l:"TITRES"},{id:"custom",i:"🎨",l:"PERSONNALISER"}].map(t=>{
+          const active=tab===t.id;
+          return(
+            <button key={t.id} onClick={()=>{AudioEngine.safeSoftClick&&AudioEngine.safeSoftClick();setTab(t.id);}} style={{flex:1,padding:"10px 8px",background:active?"linear-gradient(180deg,rgba(30,70,120,0.4),rgba(20,40,80,0.2))":"transparent",border:"none",borderBottom:"2px solid "+(active?col:"transparent"),color:active?"#c8e0ff":"#6a8ab0",fontSize:9,fontFamily:"monospace",letterSpacing:1.5,fontWeight:active?"bold":"normal",cursor:"pointer",transition:"all 0.15s"}}>
+              <span style={{marginRight:5}}>{t.i}</span>{t.l}
+            </button>
+          );
+        })}
+      </div>
+      {/* Content */}
+      <div style={{padding:"18px 24px 24px"}}>
+        {tab==="overview"&&(
+          <div>
+            <div style={{fontSize:9,color:"#5a7aa0",letterSpacing:1.5,marginBottom:10}}>STATISTIQUES DE L'EMPIRE</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+              {[
+                {l:"Missions accomplies",v:missionsDone+" / "+missionsTotal,i:"📋"},
+                {l:"Titres débloqués",v:titles.length,i:"🏆"},
+                {l:"Bâtiments",v:buildingsTotal,i:"🏗️"},
+                {l:"Flotte",v:shipsTotal,i:"🚀"},
+                {l:"Planètes visitées",v:planetsVisited,i:"🌠"},
+                {l:"Spécialisation",v:bb?bb.name:"Aucune",i:bb?bb.icon:"⚜️"},
+              ].map((s,i)=>(
+                <div key={i} style={{padding:"10px 12px",borderRadius:8,background:"rgba(8,16,32,0.6)",border:"1px solid #1a3050"}}>
+                  <div style={{fontSize:8,color:"#5a7aa0",letterSpacing:1.5,marginBottom:3}}>{s.i+" "+s.l.toUpperCase()}</div>
+                  <div style={{fontSize:14,color:"#c8e0ff",fontWeight:"bold",fontFamily:"'Share Tech Mono',monospace"}}>{s.v}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        {tab==="titles"&&(
+          <div>
+            <div style={{fontSize:9,color:"#5a7aa0",letterSpacing:1.5,marginBottom:10}}>{"TITRES DÉBLOQUÉS ("+titles.length+") — Clique pour l'équiper"}</div>
+            {titles.length===0?(
+              <div style={{textAlign:"center",padding:"30px 20px",color:"#5a7aa0"}}>
+                <div style={{fontSize:32,marginBottom:10}}>🔒</div>
+                <div style={{fontSize:10,letterSpacing:1}}>{"Aucun titre débloqué pour l'instant."}</div>
+                <div style={{fontSize:9,color:"#3a5a80",marginTop:6}}>{"Accomplis des missions pour gagner des titres prestigieux."}</div>
+              </div>
+            ):(
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
+                {["Commandant",...titles].map(t=>{
+                  const isActive=profile.activeTitle===t;
+                  const isDefault=t==="Commandant";
+                  return(
+                    <button key={t} onClick={()=>updateProfile({activeTitle:t})} style={{padding:"8px 10px",borderRadius:7,background:isActive?col+"33":"rgba(8,16,30,0.6)",border:"1px solid "+(isActive?col:"#0d2035"),color:isActive?"#fff":"#9abcd8",fontSize:10,cursor:"pointer",fontFamily:"monospace",letterSpacing:1,textAlign:"left",transition:"all 0.15s"}}>
+                      <div style={{fontSize:8,color:isActive?col:"#5a7aa0",marginBottom:2}}>{isActive?"★ ÉQUIPÉ":isDefault?"★ PAR DÉFAUT":"✓ DÉBLOQUÉ"}</div>
+                      <div style={{fontWeight:"bold"}}>{"🏆 "+t}</div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+        {tab==="custom"&&(
+          <div>
+            {/* Live preview */}
+            <div style={{display:"flex",justifyContent:"center",marginBottom:16,padding:"12px 0",background:"rgba(8,16,30,0.5)",borderRadius:8,border:"1px solid #0d2035"}}>
+              <PlayerAvatar name={user.name} state={state} size={72}/>
+            </div>
+            {/* COLORS */}
+            <div style={{fontSize:9,color:"#5a7aa0",letterSpacing:1.5,marginBottom:8}}>COULEUR DE SIGNATURE</div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:6,marginBottom:16}}>
+              {PROFILE_COLORS.map(c=>{
+                const sel=profile.colorId===c.id;
+                const unlocked=isCosmeticUnlocked(state,"color",c.id);
+                return(
+                  <button key={c.id} onClick={()=>{if(unlocked)updateProfile({colorId:c.id});else setLockedItem({category:"color",itemId:c.id});}} style={{padding:"10px 6px",borderRadius:7,background:sel?c.c+"33":"rgba(8,16,30,0.6)",border:"2px solid "+(sel?c.c:"#0d2035"),color:sel?"#fff":unlocked?"#9abcd8":"#3a5a80",fontSize:8,cursor:"pointer",fontFamily:"monospace",letterSpacing:1,textAlign:"center",transition:"all 0.15s",opacity:unlocked?1:0.55,position:"relative"}}>
+                    <div style={{width:20,height:20,borderRadius:"50%",background:c.c,margin:"0 auto 4px",boxShadow:"0 0 6px "+c.c+"88"}}/>
+                    <div>{c.name.toUpperCase()}</div>
+                    {!unlocked&&<div style={{position:"absolute",top:4,right:4,fontSize:10}}>{"🔒"}</div>}
+                  </button>
+                );
+              })}
+            </div>
+            {/* BANNERS */}
+            <div style={{fontSize:9,color:"#5a7aa0",letterSpacing:1.5,marginBottom:8}}>BANNIÈRE DE PROFIL</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginBottom:16}}>
+              {PROFILE_BANNERS.map(b=>{
+                const sel=profile.bannerId===b.id;
+                const unlocked=isCosmeticUnlocked(state,"banner",b.id);
+                return(
+                  <button key={b.id} onClick={()=>{if(unlocked)updateProfile({bannerId:b.id});else setLockedItem({category:"banner",itemId:b.id});}} style={{padding:0,borderRadius:7,border:"2px solid "+(sel?col:"#0d2035"),cursor:"pointer",overflow:"hidden",transition:"all 0.15s",textAlign:"center",opacity:unlocked?1:0.55,position:"relative"}}>
+                    <div style={{height:44,background:b.g,display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontSize:9,fontFamily:"monospace",letterSpacing:2,fontWeight:"bold",textShadow:"0 1px 3px rgba(0,0,0,0.8)"}}>{sel?"★ "+b.name.toUpperCase():b.name.toUpperCase()}</div>
+                    {!unlocked&&<div style={{position:"absolute",top:6,right:8,fontSize:12}}>{"🔒"}</div>}
+                  </button>
+                );
+              })}
+            </div>
+            {/* AVATAR CONTENT */}
+            <div style={{fontSize:9,color:"#5a7aa0",letterSpacing:1.5,marginBottom:8}}>CONTENU DE L'AVATAR</div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(6,1fr)",gap:5,marginBottom:16}}>
+              {AVATAR_CONTENTS.map(c=>{
+                const sel=profile.avatarContent===c.id;
+                const unlocked=isCosmeticUnlocked(state,"content",c.id);
+                const preview=c.id==="initials"?getInitials(user.name):c.id==="branch"?(getBranchBonus(state)?getBranchBonus(state).icon:"⚜️"):c.display;
+                return(
+                  <button key={c.id} onClick={()=>{if(unlocked)updateProfile({avatarContent:c.id});else setLockedItem({category:"content",itemId:c.id});}} title={c.name} style={{padding:"8px 4px",borderRadius:7,background:sel?col+"33":"rgba(8,16,30,0.6)",border:"2px solid "+(sel?col:"#0d2035"),cursor:"pointer",fontSize:18,lineHeight:1,transition:"all 0.15s",opacity:unlocked?1:0.55,position:"relative",color:sel?"#fff":"#9abcd8",fontFamily:"'Share Tech Mono',monospace",fontWeight:"bold"}}>
+                    {preview}
+                    {!unlocked&&<div style={{position:"absolute",top:2,right:2,fontSize:8}}>{"🔒"}</div>}
+                  </button>
+                );
+              })}
+            </div>
+            {/* AVATAR BACKGROUND */}
+            <div style={{fontSize:9,color:"#5a7aa0",letterSpacing:1.5,marginBottom:8}}>FOND</div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:6,marginBottom:16}}>
+              {AVATAR_BACKGROUNDS.map(b=>{
+                const sel=profile.avatarBg===b.id;
+                const unlocked=isCosmeticUnlocked(state,"background",b.id);
+                return(
+                  <button key={b.id} onClick={()=>{if(unlocked)updateProfile({avatarBg:b.id});else setLockedItem({category:"background",itemId:b.id});}} style={{padding:"8px 6px",borderRadius:7,background:sel?col+"33":"rgba(8,16,30,0.6)",border:"2px solid "+(sel?col:"#0d2035"),color:sel?"#fff":unlocked?"#9abcd8":"#3a5a80",fontSize:8,cursor:"pointer",fontFamily:"monospace",letterSpacing:1,textAlign:"center",transition:"all 0.15s",opacity:unlocked?1:0.55,position:"relative"}}>
+                    <div style={{width:22,height:22,borderRadius:"50%",background:b.style(col),margin:"0 auto 4px",border:"1px solid "+col}}/>
+                    <div>{b.name.toUpperCase()}</div>
+                    {!unlocked&&<div style={{position:"absolute",top:4,right:4,fontSize:10}}>{"🔒"}</div>}
+                  </button>
+                );
+              })}
+            </div>
+            {/* AVATAR BORDER */}
+            <div style={{fontSize:9,color:"#5a7aa0",letterSpacing:1.5,marginBottom:8}}>BORDURE</div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:6,marginBottom:16}}>
+              {AVATAR_BORDERS.map(b=>{
+                const sel=profile.avatarBorder===b.id;
+                const unlocked=isCosmeticUnlocked(state,"border",b.id);
+                return(
+                  <button key={b.id} onClick={()=>{if(unlocked)updateProfile({avatarBorder:b.id});else setLockedItem({category:"border",itemId:b.id});}} style={{padding:"8px 6px",borderRadius:7,background:sel?col+"33":"rgba(8,16,30,0.6)",border:"2px solid "+(sel?col:"#0d2035"),color:sel?"#fff":unlocked?"#9abcd8":"#3a5a80",fontSize:8,cursor:"pointer",fontFamily:"monospace",letterSpacing:1,textAlign:"center",transition:"all 0.15s",opacity:unlocked?1:0.55,position:"relative"}}>
+                    <div style={{width:22,height:22,borderRadius:"50%",background:col+"22",margin:"0 auto 4px",border:b.cssBorder(col),boxShadow:b.extraShadow?b.extraShadow(col):""}}/>
+                    <div>{b.name.toUpperCase()}</div>
+                    {!unlocked&&<div style={{position:"absolute",top:4,right:4,fontSize:10}}>{"🔒"}</div>}
+                  </button>
+                );
+              })}
+            </div>
+            {/* AVATAR EFFECT */}
+            <div style={{fontSize:9,color:"#5a7aa0",letterSpacing:1.5,marginBottom:8}}>EFFET</div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:6,marginBottom:16}}>
+              {AVATAR_EFFECTS.map(e=>{
+                const sel=profile.avatarEffect===e.id;
+                const unlocked=isCosmeticUnlocked(state,"effect",e.id);
+                return(
+                  <button key={e.id} onClick={()=>{if(unlocked)updateProfile({avatarEffect:e.id});else setLockedItem({category:"effect",itemId:e.id});}} style={{padding:"8px 6px",borderRadius:7,background:sel?col+"33":"rgba(8,16,30,0.6)",border:"2px solid "+(sel?col:"#0d2035"),color:sel?"#fff":unlocked?"#9abcd8":"#3a5a80",fontSize:8,cursor:"pointer",fontFamily:"monospace",letterSpacing:1,textAlign:"center",transition:"all 0.15s",opacity:unlocked?1:0.55,position:"relative"}}>
+                    <div>{e.name.toUpperCase()}</div>
+                    {!unlocked&&<div style={{position:"absolute",top:4,right:4,fontSize:10}}>{"🔒"}</div>}
+                  </button>
+                );
+              })}
+            </div>
+            {/* QUOTE */}
+            <div style={{fontSize:9,color:"#5a7aa0",letterSpacing:1.5,marginBottom:8}}>{"CITATION PERSONNELLE (max 80 car.)"}</div>
+            <div style={{display:"flex",gap:6,marginBottom:6}}>
+              <input type="text" maxLength={80} value={quoteDraft} onChange={e=>setQuoteDraft(e.target.value)} placeholder="Pour l'empire galactique..." style={{flex:1,padding:"8px 10px",borderRadius:6,background:"rgba(8,16,30,0.8)",border:"1px solid #1a3050",color:"#c8e0ff",fontSize:16,fontFamily:"monospace",outline:"none"}}/>
+              <button onClick={()=>updateProfile({quote:quoteDraft})} disabled={quoteDraft===profile.quote} style={{padding:"8px 14px",borderRadius:6,background:quoteDraft!==profile.quote?"linear-gradient(180deg,"+col+"66,"+col+"33)":"rgba(8,16,30,0.6)",border:"1px solid "+(quoteDraft!==profile.quote?col:"#0d2035"),color:quoteDraft!==profile.quote?"#fff":"#3a5a80",fontSize:9,cursor:quoteDraft!==profile.quote?"pointer":"not-allowed",fontFamily:"monospace",letterSpacing:1.5,fontWeight:"bold"}}>{"SAUVER"}</button>
+            </div>
+            <div style={{fontSize:8,color:"#3a5a80",textAlign:"right"}}>{quoteDraft.length+"/80"}</div>
+          </div>
+        )}
+      </div>
+      {lockedItem&&<LockedCosmeticModal item={lockedItem} onClose={()=>setLockedItem(null)}/>}
+    </div>
+  </div>);
+}
+
+
+function MissionsModal({state,onClaim,onClose,inline,onScroll}){
+  const [size,setSize]=useState(()=>{const vv=window.visualViewport;return{w:vv?vv.width:window.innerWidth,h:vv?vv.height:window.innerHeight};});
+  const [lockedInfo,setLockedInfo]=useState(null); // mission object when user taps a locked card
+  const [branchConfirm,setBranchConfirm]=useState(null); // {mission, branchKey} when user picks a branch
+  const [activeTab,setActiveTab]=useState(()=>{
+    // Smart default: open the tab that has the most ready missions
+    const rc=getReadyCountByCategory(state,"classic");
+    const rb=getReadyCountByCategory(state,"branch");
+    // Daily category is empty for now
+    if(rb>rc&&rb>0)return"branch";
+    return"classic";
+  });
+  useEffect(()=>{
+    const on=()=>{const vv=window.visualViewport;setSize({w:vv?vv.width:window.innerWidth,h:vv?vv.height:window.innerHeight});};
+    window.addEventListener("resize",on);
+    if(window.visualViewport)window.visualViewport.addEventListener("resize",on);
+    return()=>{window.removeEventListener("resize",on);if(window.visualViewport)window.visualViewport.removeEventListener("resize",on);};
+  },[]);
+  const W=size.w,H=size.h,isLandscape=W>=H;
+  const allActive=getActiveMissions(state);
+  const active=allActive.filter(m=>getMissionCategory(m)===activeTab)
+    .slice().sort((a,b)=>{
+      // Locked missions go to bottom
+      if(a._locked&&!b._locked)return 1;
+      if(!a._locked&&b._locked)return -1;
+      // Ready missions (completable but not yet claimed) bubble to the top
+      const aReady=!a._locked&&a.check(state)?1:0;
+      const bReady=!b._locked&&b.check(state)?1:0;
+      return bReady-aReady;
+    });
+  const claimedCount=(state&&state.missionsClaimed||[]).length;
+  const totalCount=MISSIONS.length;
+  const readyCount=active.filter(m=>!m._locked&&m.check(state)).length;
+  const readyClassic=getReadyCountByCategory(state,"classic");
+  const readyDaily=getReadyCountByCategory(state,"daily");
+  const readyBranch=getReadyCountByCategory(state,"branch");
+  const claimedCountForTab=(state&&state.missionsClaimed||[]).length;
+  const hasBranchChosen=!!(state&&state.missionFlags&&state.missionFlags.chosenBranch);
+  const TABS=[
+    {id:"classic",icon:"📋",label:"CLASSIQUES",ready:readyClassic},
+    {id:"daily",icon:"🗓️",label:"PÉRIODIQUES",ready:readyDaily},
+    {id:"branch",icon:"⚜️",label:"SPÉCIALITÉ",ready:readyBranch,locked:!hasBranchChosen},
+    {id:"done",icon:"🏆",label:"COMPLÉTÉES",count:claimedCountForTab},
+  ];
+  return(<div style={inline?{flex:1,display:"flex",flexDirection:"column",fontFamily:"monospace",overflow:"hidden",paddingTop:0,paddingBottom:0,background:"transparent"}:{position:"fixed",top:0,left:0,right:0,bottom:0,zIndex:600,background:"rgba(0,5,15,0.92)",backdropFilter:"blur(10px)",display:"flex",flexDirection:"column",fontFamily:"monospace",overflow:"hidden"}}>
+    {/* Header */}
+    {!inline&&<div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"14px 18px",borderBottom:"1px solid #1a4060",background:"rgba(8,16,30,0.9)"}}>
+      <div style={{display:"flex",alignItems:"center",gap:12}}>
+        <span style={{fontSize:18}}>📋</span>
+        <div>
+          <div style={{fontSize:13,color:"#c8e0ff",fontWeight:"bold",letterSpacing:2}}>MISSIONS</div>
+          <div style={{fontSize:8,color:"#6a8ab0",letterSpacing:1.5,marginTop:2}}>{"// "+claimedCount+"/"+totalCount+" complétées"+(readyCount>0?" · "+readyCount+" à réclamer !":"")}</div>
+        </div>
+      </div>
+      <button onClick={onClose} style={{background:"rgba(20,40,80,0.6)",border:"1px solid #1a4060",color:"#9abcd8",cursor:"pointer",fontSize:11,padding:"6px 14px",borderRadius:4,fontFamily:"monospace",letterSpacing:2}}>{"FERMER ×"}</button>
+    </div>}
+    {/* Tabs */}
+    <div style={{display:"flex",gap:0,borderBottom:"1px solid #1a4060",background:"rgba(4,10,22,0.85)",padding:"0 12px",overflowX:"auto",flexShrink:0,justifyContent:"center"}}>
+      {TABS.map(t=>{
+        const isActive=activeTab===t.id;
+        const disabled=t.locked;
+        return(
+          <button key={t.id}
+            onClick={()=>{if(!disabled){AudioEngine.safeSoftClick&&AudioEngine.safeSoftClick();setActiveTab(t.id);}}}
+            disabled={disabled}
+            style={{
+              position:"relative",
+              padding:"10px 14px",
+              background:isActive?"linear-gradient(180deg,rgba(30,70,120,0.4),rgba(20,40,80,0.2))":"transparent",
+              border:"none",
+              borderBottom:"2px solid "+(isActive?"#4a9adf":"transparent"),
+              color:disabled?"#2a3a50":isActive?"#c8e0ff":"#6a8ab0",
+              fontSize:9,
+              fontFamily:"monospace",
+              letterSpacing:1.5,
+              fontWeight:isActive?"bold":"normal",
+              cursor:disabled?"not-allowed":"pointer",
+              opacity:disabled?0.5:1,
+              whiteSpace:"nowrap",
+              transition:"all 0.15s"
+            }}>
+            <span style={{marginRight:6}}>{t.icon}</span>{t.label}
+            {t.ready>0&&!disabled&&<span style={{position:"absolute",top:4,right:4,background:"#44aa66",color:"#fff",fontSize:7,fontWeight:"bold",padding:"1px 5px",borderRadius:7,boxShadow:"0 0 5px rgba(68,170,102,0.6)"}}>{t.ready}</span>}
+            {t.count>0&&!disabled&&<span style={{position:"absolute",top:4,right:4,background:"rgba(100,120,150,0.3)",color:"#8aa8cc",fontSize:7,fontWeight:"bold",padding:"1px 5px",borderRadius:7,border:"1px solid rgba(120,150,180,0.3)"}}>{t.count}</span>}
+            {disabled&&<span style={{position:"absolute",top:4,right:6,fontSize:9,opacity:0.6}}>{"🔒"}</span>}
+          </button>
+        );
+      })}
+    </div>
+    {/* Content */}
+    <div onScroll={onScroll} style={{flex:1,overflow:"auto",WebkitOverflowScrolling:"touch",overscrollBehavior:"contain",padding:"14px 16px 90px"}}>
+      {/* Branch bonus banner — shown only on the Specialty tab */}
+      {activeTab==="branch"&&(()=>{
+        const bb=getBranchBonus(state);
+        if(!bb)return null;
+        return(
+          <div style={{maxWidth:600,margin:"0 auto 14px",padding:"10px 14px",borderRadius:8,background:"linear-gradient(160deg,"+bb.color+"22,"+bb.color+"11)",border:"1px solid "+bb.color+"66",boxShadow:"0 0 14px "+bb.color+"22"}}>
+            <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:4}}>
+              <span style={{fontSize:22}}>{bb.icon}</span>
+              <div style={{flex:1}}>
+                <div style={{fontSize:10,color:bb.color,fontFamily:"monospace",letterSpacing:2,fontWeight:"bold"}}>{"SPÉCIALISATION : "+bb.name.toUpperCase()}</div>
+                <div style={{fontSize:9,color:"#8aa8cc",marginTop:2,letterSpacing:0.5}}>{bb.desc}</div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+      {/* Tab-specific empty states */}
+      {activeTab==="daily"&&(
+        <div style={{textAlign:"center",padding:"40px 20px",color:"#7a9ac0",fontFamily:"monospace",maxWidth:500,margin:"0 auto"}}>
+          <div style={{fontSize:42,marginBottom:14}}>🗓️</div>
+          <div style={{fontSize:13,letterSpacing:2,marginBottom:8,color:"#c8e0ff",fontWeight:"bold"}}>BIENTÔT DISPONIBLE</div>
+          <div style={{fontSize:10,color:"#6a8ab0",letterSpacing:1,lineHeight:1.6}}>
+            {"Des missions quotidiennes et hebdomadaires arriveront prochainement pour récompenser ta connexion régulière."}
+          </div>
+        </div>
+      )}
+      {activeTab==="branch"&&!hasBranchChosen&&(
+        <div style={{textAlign:"center",padding:"40px 20px",color:"#7a9ac0",fontFamily:"monospace",maxWidth:500,margin:"0 auto"}}>
+          <div style={{fontSize:42,marginBottom:14}}>🔒</div>
+          <div style={{fontSize:13,letterSpacing:2,marginBottom:8,color:"#c8e0ff",fontWeight:"bold"}}>SPÉCIALITÉ VERROUILLÉE</div>
+          <div style={{fontSize:10,color:"#6a8ab0",letterSpacing:1,lineHeight:1.6}}>
+            {"Complète les missions classiques pour débloquer ton choix de spécialisation (Économique, Militaire ou Exploration)."}
+          </div>
+        </div>
+      )}
+      {activeTab!=="daily"&&activeTab!=="done"&&!(activeTab==="branch"&&!hasBranchChosen)&&active.length===0?(
+        <div style={{textAlign:"center",padding:"40px 20px",color:"#7a9ac0",fontFamily:"monospace"}}>
+          <div style={{fontSize:36,marginBottom:12}}>🏆</div>
+          <div style={{fontSize:14,letterSpacing:2,marginBottom:6,color:"#c8e0ff"}}>{activeTab==="branch"?"BRANCHE TERMINÉE":"TOUTES LES MISSIONS COMPLÉTÉES"}</div>
+          <div style={{fontSize:10,color:"#6a8ab0",letterSpacing:1}}>De nouvelles missions arriveront bientôt.</div>
+        </div>
+      ):(activeTab!=="daily"&&activeTab!=="done"&&!(activeTab==="branch"&&!hasBranchChosen)&&(
+        <div style={{display:"flex",flexDirection:"column",gap:10,maxWidth:600,margin:"0 auto"}}>
+          {active.map((m,i)=>{
+            const locked=!!m._locked;
+            const ready=!locked&&m.check(state);
+            if(locked){
+              return(
+                <div key={m.id} onClick={()=>setLockedInfo(m)} style={{
+                  position:"relative",
+                  padding:"14px 14px 12px",
+                  background:"linear-gradient(160deg,rgba(60,20,20,0.5),rgba(30,10,10,0.65))",
+                  border:"1px solid rgba(180,60,60,0.55)",
+                  borderRadius:8,
+                  cursor:"pointer",
+                  opacity:0.75,
+                  animation:"fadeIn 0.4s "+(i*60)+"ms backwards"
+                }}>
+                  <div style={{position:"absolute",top:-8,right:10,fontSize:8,background:"rgba(120,30,30,0.9)",color:"#ffdcdc",padding:"3px 10px",borderRadius:3,fontWeight:"bold",letterSpacing:1.5,border:"1px solid rgba(180,60,60,0.6)"}}>{"🔒 VERROUILLÉE"}</div>
+                  <div style={{display:"flex",alignItems:"flex-start",gap:12,marginBottom:8}}>
+                    <span style={{fontSize:28,filter:"grayscale(0.6) brightness(0.7)"}}>{m.icon}</span>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontSize:12,color:"#d8a8a8",fontWeight:"bold",letterSpacing:1.5,marginBottom:4}}>{m.title.toUpperCase()}</div>
+                      <div style={{fontSize:10,color:"#a88888",lineHeight:1.5}}>{m.desc}</div>
+                    </div>
+                  </div>
+                  <div style={{paddingTop:8,borderTop:"1px dashed rgba(180,80,80,0.3)",fontSize:9,color:"#c08080",fontStyle:"italic",letterSpacing:0.5,textAlign:"center"}}>{"Touchez pour voir les prérequis"}</div>
+                </div>
+              );
+            }
+            return(
+              <div key={m.id} style={{
+                position:"relative",
+                padding:"14px 14px 12px",
+                background:ready?"linear-gradient(160deg,rgba(30,70,40,0.6),rgba(15,45,25,0.7))":"linear-gradient(160deg,rgba(15,30,55,0.7),rgba(10,20,40,0.85))",
+                border:"1px solid "+(ready?"#44aa66":"rgba(40,80,130,0.4)"),
+                borderRadius:8,
+                boxShadow:ready?"0 0 18px rgba(68,170,102,0.35)":"none",
+                animation:"fadeIn 0.4s "+(i*60)+"ms backwards"
+              }}>
+                {ready&&<div style={{position:"absolute",top:-8,right:10,fontSize:8,background:"#44aa66",color:"#fff",padding:"3px 10px",borderRadius:3,fontWeight:"bold",letterSpacing:1.5,boxShadow:"0 0 8px rgba(68,170,102,0.6)"}}>★ PRÊT À RÉCLAMER</div>}
+                <div style={{display:"flex",alignItems:"flex-start",gap:12,marginBottom:10}}>
+                  <span style={{fontSize:28,filter:ready?"drop-shadow(0 0 8px rgba(100,220,140,0.5))":"drop-shadow(0 0 4px rgba(60,120,180,0.3))"}}>{m.icon}</span>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontSize:12,color:ready?"#b0ffc0":"#c8e0ff",fontWeight:"bold",letterSpacing:1.5,marginBottom:4}}>{m.title.toUpperCase()}</div>
+                    <div style={{fontSize:10,color:"#8aa8cc",lineHeight:1.5}}>{m.desc}</div>
+                  </div>
+                </div>
+                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",paddingTop:8,borderTop:"1px dashed rgba(60,100,150,0.3)",gap:8,flexWrap:"wrap"}}>
+                  <div style={{display:"flex",gap:10,fontSize:10,flexWrap:"wrap",alignItems:"center"}}>
+                    <span style={{color:"#6a8ab0",fontFamily:"monospace",letterSpacing:1.5,fontSize:8}}>RÉCOMPENSE :</span>
+                    {m.reward.metal>0&&<span style={{color:"#c8e0ff",fontFamily:"'Share Tech Mono',monospace",fontWeight:"bold"}}>⛏ {m.reward.metal}</span>}
+                    {m.reward.crystal>0&&<span style={{color:"#7adfe8",fontFamily:"'Share Tech Mono',monospace",fontWeight:"bold"}}>💎 {m.reward.crystal}</span>}
+                    {m.reward.deut>0&&<span style={{color:"#9adda0",fontFamily:"'Share Tech Mono',monospace",fontWeight:"bold"}}>⚗ {m.reward.deut}</span>}
+                    {m.reward.title&&<span style={{color:"#ffd700",fontFamily:"monospace",fontSize:9,letterSpacing:1,padding:"1px 6px",background:"rgba(120,90,20,0.3)",border:"1px solid rgba(180,140,40,0.5)",borderRadius:3}}>{"🏆 "+m.reward.title}</span>}
+                    {(()=>{const u=COSMETIC_UNLOCKS[m.id];if(!u)return null;const d=getCosmeticDisplay(u.category,u.itemId);if(!d)return null;return(<span style={{color:"#dca0ff",fontFamily:"monospace",fontSize:9,letterSpacing:1,padding:"1px 6px",background:"rgba(90,60,140,0.3)",border:"1px solid rgba(150,100,220,0.5)",borderRadius:3}}>{"🎨 "+d.typeLabel+": "+d.name}</span>);})()}
+                  </div>
+                  {m.branchChoice?(
+                    <div style={{display:"flex",gap:6,flexWrap:"wrap",width:"100%",marginTop:4}}>
+                      {[{k:"eco",n:"Économique",i:"💰",c:"#d4a850"},{k:"mil",n:"Militaire",i:"⚔️",c:"#d46060"},{k:"exp",n:"Exploration",i:"🔭",c:"#60a0d4"}].map(br=>(
+                        <button key={br.k} onClick={()=>setBranchConfirm({mission:m,branchKey:br.k})} style={{
+                          flex:"1 1 100px",
+                          padding:"8px 10px",
+                          borderRadius:6,
+                          border:"1px solid "+br.c,
+                          cursor:"pointer",
+                          background:"linear-gradient(180deg,rgba(20,30,50,0.8),rgba(10,18,35,0.9))",
+                          color:br.c,
+                          fontSize:10,
+                          fontFamily:"monospace",
+                          letterSpacing:1.5,
+                          fontWeight:"bold",
+                          boxShadow:"0 0 8px "+br.c+"44",
+                          whiteSpace:"nowrap",
+                          transition:"all 0.2s"
+                        }}>
+                          <div style={{fontSize:16,marginBottom:2}}>{br.i}</div>
+                          <div>{br.n.toUpperCase()}</div>
+                        </button>
+                      ))}
+                    </div>
+                  ):ready&&(
+                    <button onClick={()=>onClaim(m)} style={{
+                      padding:"6px 14px",
+                      borderRadius:5,
+                      border:"1px solid #44aa66",
+                      cursor:"pointer",
+                      background:"linear-gradient(180deg,rgba(80,180,120,0.6),rgba(40,120,70,0.7))",
+                      color:"#fff",
+                      fontSize:10,
+                      fontFamily:"monospace",
+                      letterSpacing:2,
+                      fontWeight:"bold",
+                      boxShadow:"0 0 10px rgba(68,170,102,0.5)",
+                      whiteSpace:"nowrap"
+                    }}>
+                      ✓ RÉCLAMER
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ))}
+      {/* Completed missions tab content */}
+      {activeTab==="done"&&(()=>{
+        const claimedIds=(state&&state.missionsClaimed)||[];
+        if(claimedIds.length===0){
+          return(
+            <div style={{textAlign:"center",padding:"40px 20px",color:"#7a9ac0",fontFamily:"monospace",maxWidth:500,margin:"0 auto"}}>
+              <div style={{fontSize:42,marginBottom:14,opacity:0.5}}>🏆</div>
+              <div style={{fontSize:13,letterSpacing:2,marginBottom:8,color:"#c8e0ff",fontWeight:"bold"}}>{"AUCUNE MISSION COMPLÉTÉE"}</div>
+              <div style={{fontSize:10,color:"#6a8ab0",letterSpacing:1,lineHeight:1.6}}>{"Tes missions réclamées apparaîtront ici pour suivre ta progression."}</div>
+            </div>
+          );
+        }
+        // Keep the chronological order of claiming (most recent first)
+        const claimedMissions=claimedIds.slice().reverse().map(id=>MISSIONS.find(mm=>mm.id===id)).filter(Boolean);
+        // Summary stats
+        const totalResources={metal:0,crystal:0,deut:0};
+        const titles=[];
+        claimedMissions.forEach(m=>{
+          totalResources.metal+=m.reward.metal||0;
+          totalResources.crystal+=m.reward.crystal||0;
+          totalResources.deut+=m.reward.deut||0;
+          if(m.reward.title)titles.push(m.reward.title);
+        });
+        return(
+          <div style={{maxWidth:600,margin:"0 auto"}}>
+            {/* Summary header */}
+            <div style={{padding:"12px 14px",marginBottom:12,borderRadius:8,background:"linear-gradient(160deg,rgba(40,60,30,0.5),rgba(25,40,20,0.6))",border:"1px solid rgba(120,180,120,0.4)",boxShadow:"0 0 14px rgba(80,160,100,0.15)"}}>
+              <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:6}}>
+                <span style={{fontSize:22}}>{"🏆"}</span>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:11,color:"#c8e8cc",fontFamily:"monospace",letterSpacing:2,fontWeight:"bold"}}>{claimedMissions.length+" MISSION"+(claimedMissions.length>1?"S":"")+" COMPLÉTÉE"+(claimedMissions.length>1?"S":"")}</div>
+                  <div style={{fontSize:8,color:"#88aa90",marginTop:2,letterSpacing:1}}>{"Récap de ta progression"}</div>
+                </div>
+              </div>
+              <div style={{fontSize:9,color:"#a8c8b0",fontFamily:"monospace",letterSpacing:1,display:"flex",gap:12,flexWrap:"wrap",paddingTop:6,borderTop:"1px dashed rgba(120,180,120,0.25)"}}>
+                <span>{"⛏ "+fmt(totalResources.metal)}</span>
+                <span>{"💎 "+fmt(totalResources.crystal)}</span>
+                <span>{"⚗ "+fmt(totalResources.deut)}</span>
+                {titles.length>0&&<span style={{color:"#ffd080"}}>{"🏆 "+titles.length+" titre"+(titles.length>1?"s":"")}</span>}
+              </div>
+            </div>
+            {/* Chronological list */}
+            <div style={{display:"flex",flexDirection:"column",gap:6}}>
+              {claimedMissions.map((m,i)=>(
+                <div key={m.id} style={{padding:"10px 12px",background:"rgba(12,22,40,0.7)",border:"1px solid rgba(60,100,80,0.3)",borderRadius:6,display:"flex",alignItems:"center",gap:10,opacity:0.92}}>
+                  <span style={{fontSize:20,filter:"saturate(0.85)",flexShrink:0}}>{m.icon}</span>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontSize:10,color:"#b0c8dd",fontFamily:"monospace",letterSpacing:1,fontWeight:"bold"}}>{m.title}</div>
+                    <div style={{fontSize:8,color:"#6a8ab0",marginTop:2,lineHeight:1.4,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{m.desc}</div>
+                    <div style={{display:"flex",gap:8,marginTop:4,flexWrap:"wrap",fontSize:8,fontFamily:"monospace"}}>
+                      {m.reward.metal>0&&<span style={{color:"#8aa8cc"}}>{"⛏ "+fmt(m.reward.metal)}</span>}
+                      {m.reward.crystal>0&&<span style={{color:"#6abfd0"}}>{"💎 "+fmt(m.reward.crystal)}</span>}
+                      {m.reward.deut>0&&<span style={{color:"#7ac890"}}>{"⚗ "+fmt(m.reward.deut)}</span>}
+                      {m.reward.title&&<span style={{color:"#ffd080",padding:"0 5px",background:"rgba(120,90,20,0.25)",border:"1px solid rgba(180,140,40,0.35)",borderRadius:3}}>{"🏆 "+m.reward.title}</span>}
+                      {m.branch&&<span style={{color:{eco:"#d4a850",mil:"#d46060",exp:"#60a0d4"}[m.branch],opacity:0.8}}>{{eco:"💰 Éco",mil:"⚔️ Mil",exp:"🔭 Exp"}[m.branch]}</span>}
+                    </div>
+                  </div>
+                  <span style={{fontSize:14,color:"#88cc99",flexShrink:0}}>{"✓"}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+    </div>
+    {/* Locked mission explanation modal */}
+    {lockedInfo&&(()=>{
+      const unmetIds=lockedInfo._unmetRequires||[];
+      const unmetMissions=unmetIds.map(id=>MISSIONS.find(mm=>mm.id===id)).filter(Boolean);
+      return(
+        <div onClick={()=>setLockedInfo(null)} style={{position:"fixed",inset:0,background:"rgba(0,5,15,0.95)",zIndex:700,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+          <div onClick={e=>e.stopPropagation()} style={{width:"min(420px,100%)",maxHeight:"85vh",overflowY:"auto",WebkitOverflowScrolling:"touch",background:"linear-gradient(180deg,rgba(25,15,15,0.98),rgba(15,8,8,0.98))",border:"1px solid rgba(180,70,70,0.6)",borderRadius:10,boxShadow:"0 0 40px rgba(180,60,60,0.35)"}}>
+            <div style={{padding:"14px 16px",borderBottom:"1px solid rgba(120,50,50,0.4)",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+              <div style={{display:"flex",alignItems:"center",gap:10}}>
+                <span style={{fontSize:20,filter:"grayscale(0.4)"}}>{lockedInfo.icon}</span>
+                <div>
+                  <div style={{fontSize:12,color:"#ffdcdc",fontFamily:"monospace",letterSpacing:1.5,fontWeight:"bold"}}>{"🔒 MISSION VERROUILLÉE"}</div>
+                  <div style={{fontSize:9,color:"#c08080",fontFamily:"monospace",marginTop:2,letterSpacing:1}}>{lockedInfo.title}</div>
+                </div>
+              </div>
+              <button onClick={()=>setLockedInfo(null)} style={{background:"rgba(80,20,20,0.6)",border:"1px solid rgba(180,60,60,0.4)",color:"#e8b8b8",cursor:"pointer",fontSize:11,padding:"4px 10px",borderRadius:4,fontFamily:"monospace",letterSpacing:2}}>{"×"}</button>
+            </div>
+            <div style={{padding:"14px 16px"}}>
+              <div style={{fontSize:10,color:"#d8a8a8",lineHeight:1.6,marginBottom:12}}>{"Cette mission ne sera accessible qu'une fois les missions suivantes terminées et réclamées :"}</div>
+              <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                {unmetMissions.map(um=>{
+                  const isReady=um.check(state);
+                  return(
+                    <div key={um.id} style={{padding:"8px 10px",background:"rgba(20,12,12,0.6)",border:"1px solid "+(isReady?"rgba(100,180,120,0.4)":"rgba(120,50,50,0.35)"),borderRadius:5,display:"flex",alignItems:"center",gap:9}}>
+                      <span style={{fontSize:18,opacity:isReady?1:0.6}}>{um.icon}</span>
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{fontSize:10,color:isReady?"#a0e8b8":"#d8b8b8",fontFamily:"monospace",letterSpacing:1,fontWeight:"bold"}}>{um.title}</div>
+                        <div style={{fontSize:8,color:isReady?"#70c090":"#a08080",marginTop:2}}>{isReady?"✓ Prête à réclamer":um.desc}</div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              <div style={{marginTop:14,padding:"8px 10px",background:"rgba(40,20,20,0.4)",border:"1px dashed rgba(150,80,80,0.3)",borderRadius:5,fontSize:9,color:"#b89898",fontStyle:"italic",lineHeight:1.5,textAlign:"center"}}>{"💡 Astuce : Les missions complétées doivent aussi être réclamées (bouton « Réclamer ») pour déverrouiller la suite."}</div>
+            </div>
+          </div>
+        </div>
+      );
+    })()}
+    {/* Branch choice confirmation modal */}
+    {branchConfirm&&(()=>{
+      const br=BRANCH_BONUSES[branchConfirm.branchKey];
+      if(!br)return null;
+      const bullets=br.desc.split(" · ");
+      return(
+        <div onClick={()=>setBranchConfirm(null)} style={{position:"fixed",inset:0,background:"rgba(0,5,15,0.92)",zIndex:700,display:"flex",alignItems:"center",justifyContent:"center",padding:16,backdropFilter:"blur(8px)"}}>
+          <div onClick={e=>e.stopPropagation()} style={{width:"min(440px,100%)",maxHeight:"88vh",overflowY:"auto",WebkitOverflowScrolling:"touch",background:"linear-gradient(180deg,rgba(15,18,30,0.98),rgba(8,10,20,0.98))",border:"2px solid "+br.color,borderRadius:10,boxShadow:"0 0 40px "+br.color+"55"}}>
+            {/* Header with branch color */}
+            <div style={{padding:"16px 18px",borderBottom:"1px solid "+br.color+"55",background:"linear-gradient(180deg,"+br.color+"22,transparent)",textAlign:"center"}}>
+              <div style={{fontSize:44,marginBottom:6}}>{br.icon}</div>
+              <div style={{fontSize:13,color:br.color,fontFamily:"monospace",letterSpacing:3,fontWeight:"bold"}}>{"BRANCHE "+br.name.toUpperCase()}</div>
+              <div style={{fontSize:9,color:"#8aa8cc",fontFamily:"monospace",marginTop:4,letterSpacing:1.5}}>{"Confirmation de spécialisation"}</div>
+            </div>
+            {/* Warning banner */}
+            <div style={{margin:"14px 16px 10px",padding:"10px 12px",background:"linear-gradient(135deg,rgba(180,80,40,0.2),rgba(100,40,20,0.25))",border:"1px solid rgba(220,140,80,0.5)",borderRadius:6}}>
+              <div style={{fontSize:10,color:"#ffb878",fontFamily:"monospace",letterSpacing:1.5,fontWeight:"bold",marginBottom:4}}>{"⚠️ CHOIX DÉFINITIF"}</div>
+              <div style={{fontSize:10,color:"#e8c09a",lineHeight:1.5}}>{"Ta spécialisation ne pourra "}<span style={{fontWeight:"bold",color:"#ffcc99"}}>{"jamais"}</span>{" être changée. Les bonus sont permanents et les technologies des autres branches te seront à jamais inaccessibles."}</div>
+            </div>
+            {/* Bonuses preview */}
+            <div style={{padding:"0 16px 10px"}}>
+              <div style={{fontSize:9,color:br.color,letterSpacing:2,fontFamily:"monospace",fontWeight:"bold",marginBottom:8,textAlign:"center"}}>{"✦ BONUS PERMANENTS ✦"}</div>
+              <div style={{display:"flex",flexDirection:"column",gap:5}}>
+                {bullets.map((b,i)=>(
+                  <div key={i} style={{padding:"8px 10px",background:br.color+"11",border:"1px solid "+br.color+"33",borderRadius:5,fontSize:10,color:"#d8e8ff",fontFamily:"monospace",letterSpacing:0.5}}>
+                    <span style={{color:br.color,marginRight:6,fontWeight:"bold"}}>{"◆"}</span>
+                    {b}
+                  </div>
+                ))}
+              </div>
+            </div>
+            {/* Consequences */}
+            <div style={{margin:"0 16px 14px",padding:"9px 11px",background:"rgba(20,15,30,0.5)",border:"1px dashed rgba(100,80,140,0.4)",borderRadius:5,fontSize:9,color:"#a098b8",lineHeight:1.5}}>
+              <div style={{color:"#c8b8e0",fontWeight:"bold",marginBottom:3,letterSpacing:1}}>{"🔬 TECHNOLOGIES DÉBLOQUÉES"}</div>
+              <div>{"Les 3 technologies de la branche "+br.name+" dans ton Laboratoire, ainsi que 5 nouvelles missions de spécialité."}</div>
+            </div>
+            {/* Action buttons */}
+            <div style={{padding:"0 16px 18px",display:"flex",gap:8}}>
+              <button onClick={()=>setBranchConfirm(null)} style={{flex:1,padding:"10px 0",borderRadius:6,border:"1px solid #3a4a60",cursor:"pointer",background:"rgba(20,25,40,0.8)",color:"#8a9ab0",fontFamily:"monospace",fontSize:10,letterSpacing:2,fontWeight:"bold"}}>{"← ANNULER"}</button>
+              <button onClick={()=>{const{mission,branchKey}=branchConfirm;setBranchConfirm(null);onClaim(mission,branchKey);}} style={{flex:2,padding:"10px 0",borderRadius:6,border:"1px solid "+br.color,cursor:"pointer",background:"linear-gradient(180deg,"+br.color+"55,"+br.color+"22)",color:"#fff",fontFamily:"monospace",fontSize:11,letterSpacing:2,fontWeight:"bold",boxShadow:"0 0 14px "+br.color+"55"}}>{"✓ JE CONFIRME"}</button>
+            </div>
+          </div>
+        </div>
+      );
+    })()}
+  </div>);
+}
+
+
+function PlanetBonusesModal({currentType,onClose}){
+  const [size,setSize]=useState(()=>{const vv=window.visualViewport;return{w:vv?vv.width:window.innerWidth,h:vv?vv.height:window.innerHeight};});
+  useEffect(()=>{
+    const on=()=>{const vv=window.visualViewport;setSize({w:vv?vv.width:window.innerWidth,h:vv?vv.height:window.innerHeight});};
+    window.addEventListener("resize",on);
+    if(window.visualViewport)window.visualViewport.addEventListener("resize",on);
+    return()=>{window.removeEventListener("resize",on);if(window.visualViewport)window.visualViewport.removeEventListener("resize",on);};
+  },[]);
+  const W=size.w,H=size.h,isLandscape=W>=H;
+  // Icon + color + description for each planet type
+  const PLANET_META={
+    Tellurique:{icon:"🌍",col:"#6aaa6a",desc:"Équilibrée sur toutes les ressources"},
+    Gazeuse:{icon:"🪐",col:"#c89868",desc:"Atmosphère riche en énergie"},
+    Glaciale:{icon:"❄️",col:"#88b8d8",desc:"Glace et gaz rares, idéale pour le deutérium"},
+    Désertique:{icon:"🏜️",col:"#d8b058",desc:"Ensoleillement maximal"},
+    Océanique:{icon:"🌊",col:"#4da8d4",desc:"Vastes étendues d'eau riches en deutérium"},
+    Volcanique:{icon:"🌋",col:"#e85830",desc:"Sous-sol riche en minerais"},
+    Forestière:{icon:"🌲",col:"#3a8a40",desc:"Biosphère dense en cristaux organiques"}
+  };
+  const RES_ICON={metal:"⛏",crystal:"💎",deut:"⚗",energy:"⚡"};
+  const RES_LABEL={metal:"Métal",crystal:"Cristal",deut:"Deutérium",energy:"Énergie"};
+  const types=Object.keys(PLANET_PASSIVE_BONUS);
+  const cols=isLandscape?3:2;
+  return(<div style={{position:"fixed",top:0,left:0,right:0,bottom:0,zIndex:600,background:"rgba(0,5,15,0.92)",backdropFilter:"blur(10px)",display:"flex",flexDirection:"column",fontFamily:"monospace",overflow:"hidden"}}>
+    {/* Header */}
+    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"14px 18px",borderBottom:"1px solid #1a4060",background:"rgba(8,16,30,0.9)"}}>
+      <div style={{display:"flex",alignItems:"center",gap:12}}>
+        <span style={{fontSize:18,color:"#e8c878"}}>✦</span>
+        <div>
+          <div style={{fontSize:13,color:"#c8e0ff",fontWeight:"bold",letterSpacing:2}}>BONUS PLANÉTAIRES</div>
+          <div style={{fontSize:8,color:"#6a8ab0",letterSpacing:1.5,marginTop:2}}>{"// "+types.length+" TYPES DE PLANÈTES"}</div>
+        </div>
+      </div>
+      <button onClick={onClose} style={{background:"rgba(20,40,80,0.6)",border:"1px solid #1a4060",color:"#9abcd8",cursor:"pointer",fontSize:11,padding:"6px 14px",borderRadius:4,fontFamily:"monospace",letterSpacing:2}}>{"FERMER ×"}</button>
+    </div>
+    {/* Content */}
+    <div style={{flex:1,overflow:"auto",WebkitOverflowScrolling:"touch",padding:"14px 16px 20px"}}>
+      <div style={{fontSize:10,color:"#8aa8cc",lineHeight:1.5,marginBottom:14,padding:"10px 12px",background:"rgba(10,25,50,0.5)",border:"1px solid rgba(40,80,130,0.3)",borderRadius:6,fontStyle:"italic"}}>
+        Chaque planète applique un bonus passif à vos productions globales. Les valeurs ci-dessous sont la <b>base</b> ; ce bonus est multiplié par un facteur selon l'habitabilité de la planète : <b>×0.75</b> Paradisiaque · <b>×1.0</b> Habitable · <b>×1.20</b> Marginale · <b>×1.45</b> Hostile · <b>×1.75</b> Inhospitalier. Les planètes difficiles récompensent davantage !
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat("+cols+",1fr)",gap:10}}>
+        {types.map(type=>{
+          const b=PLANET_PASSIVE_BONUS[type];
+          const meta=PLANET_META[type]||{icon:"◆",col:"#7a9aa0",desc:""};
+          const isCurrent=type===currentType;
+          // Extract all bonus entries (exclude "label" key)
+          const bonuses=Object.keys(b).filter(k=>k!=="label");
+          return(<div key={type} style={{
+            position:"relative",
+            padding:"14px 13px 13px",
+            background:isCurrent?"linear-gradient(160deg,rgba(40,70,20,0.55),rgba(20,40,10,0.7))":"linear-gradient(160deg,rgba(15,30,55,0.7),rgba(10,20,40,0.8))",
+            border:"1px solid "+(isCurrent?"#66cc66":meta.col+"55"),
+            borderRadius:8,
+            boxShadow:isCurrent?"0 0 18px rgba(102,204,102,0.35)":"none"
+          }}>
+            {isCurrent&&<div style={{position:"absolute",top:-8,right:8,fontSize:8,background:"#44aa66",color:"#fff",padding:"2px 8px",borderRadius:3,fontWeight:"bold",letterSpacing:1.5}}>★ ACTUELLE</div>}
+            <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
+              <span style={{fontSize:28,filter:"drop-shadow(0 0 6px "+meta.col+"55)"}}>{meta.icon}</span>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:12,color:meta.col,fontWeight:"bold",letterSpacing:1.5}}>{type.toUpperCase()}</div>
+                <div style={{fontSize:8,color:"#7a9ac0",marginTop:2,lineHeight:1.3,fontStyle:"italic"}}>{meta.desc}</div>
+              </div>
+            </div>
+            <div style={{paddingTop:8,borderTop:"1px dashed rgba(60,100,150,0.3)"}}>
+              {bonuses.map(k=>(
+                <div key={k} style={{display:"flex",alignItems:"center",justifyContent:"space-between",fontSize:10,padding:"3px 0"}}>
+                  <span style={{color:"#9abcd8"}}>{(RES_ICON[k]||"+")+" "+(RES_LABEL[k]||k)}</span>
+                  <span style={{color:"#9adda0",fontWeight:"bold"}}>{"+"+Math.round(b[k]*100)+"%"}</span>
+                </div>
+              ))}
+            </div>
+          </div>);
+        })}
+      </div>
+    </div>
+  </div>);
+}
+
+// ──────────────────────────────────────────────────────
+// HUB SECTION — full-screen overlay for one of: continents, buildings, ships, research
+// ──────────────────────────────────────────────────────
+function HubSection({section,planet,userId,planets,myIdx,initialState,onStateChange,onClose,onOpenZoneInfo}){
+  const [state,setState]=useState(initialState);
+  const [shipTab,setShipTab]=useState("build");
+  const [selResource,setSelResource]=useState(null);
+  useEffect(()=>{
+    const t=setInterval(()=>{
+      setState(p=>{
+        const fresh=loadGS(userId)||p;
+        const merged=(fresh.queue&&(!p.queue||fresh.queue.startAt!==p.queue.startAt))?fresh:p;
+        const n=tickGS(merged,planet);
+        saveGS(userId,n);
+        onStateChange&&onStateChange(n);
+        return n;
+      });
+    },1000);
+    return()=>clearInterval(t);
+  },[userId]);
+  const doBuild=(b,lv)=>{
+    setState(prev=>{
+      if(prev.queue)return prev;
+      const cost=bCost(b,lv,planet,prev);
+      if(!canAfford(prev.resources,cost))return prev;
+      const secs=bTime(b,lv,prev.buildings.usine_robots||0,planet,prev,prev.zones);
+      const ns={...prev,resources:deduct(prev.resources,cost),queue:{type:"build",id:b.id,startAt:Date.now(),finishAt:Date.now()+secs*1000}};
+      saveGS(userId,ns);onStateChange&&onStateChange(ns);
+      return ns;
+    });
+    setTimeout(()=>{if(AudioEngine&&AudioEngine.safeBuildStart)AudioEngine.safeBuildStart();},50);
+  };
+  const doShip=(s,q)=>{
+    setState(prev=>{
+      if(prev.queue)return prev;
+      const _sc=sCost(s,prev,planet);const tc={metal:_sc.metal*q,crystal:_sc.crystal*q,deut:_sc.deut*q};
+      if(!canAfford(prev.resources,tc))return prev;
+      const secs=Math.max(20,Math.round(60*q));
+      const ns={...prev,resources:deduct(prev.resources,tc),queue:{type:"ship",id:s.id,qty:q,startAt:Date.now(),finishAt:Date.now()+secs*1000}};
+      saveGS(userId,ns);onStateChange&&onStateChange(ns);
+      return ns;
+    });
+    setTimeout(()=>{if(AudioEngine&&AudioEngine.safeBuildStart)AudioEngine.safeBuildStart();},50);
+  };
+  const doFleet=(f,sel)=>{
+    setState(prev=>{
+      const ns2={...prev.ships};
+      Object.entries(sel).forEach(([k,v])=>{ns2[k]=Math.max(0,(ns2[k]||0)-v);});
+      const ns={...prev,ships:ns2,fleets:[...(prev.fleets||[]),f],missionFlags:{...(prev.missionFlags||{}),dispatchedFleet:true}};
+      saveGS(userId,ns);onStateChange&&onStateChange(ns);
+      return ns;
+    });
+  };
+  const doResearch=(tech,lv)=>{
+    setState(prev=>{
+      if(prev.researchQueue)return prev;
+      const labLv=(prev.buildings&&prev.buildings.laboratoire)||0;
+      if(labLv<1)return prev;
+      const cost=techCost(tech,lv);
+      if(!canAffordTech(prev,cost))return prev;
+      const secs=techTime(tech,lv,labLv);
+      const ns={...prev,resources:{metal:prev.resources.metal-cost.metal,crystal:prev.resources.crystal-cost.crystal,deut:prev.resources.deut-(cost.deut||0)},researchQueue:{techId:tech.id,fromLevel:lv,toLevel:lv+1,startAt:Date.now(),finishAt:Date.now()+secs*1000}};
+      saveGS(userId,ns);onStateChange&&onStateChange(ns);
+      if(AudioEngine.safeClick)AudioEngine.safeClick();
+      return ns;
+    });
+  };
+  const doFinalize=()=>{
+    setState(prev=>{
+      if(!prev.queue||!prev.queue.ready)return prev;
+      const q=prev.queue;
+      let ns={...prev,buildings:{...prev.buildings},ships:{...prev.ships},continents:(prev.continents||[]).map(c=>({...c,zones:[...c.zones]})),queue:null};
+      if(q.type==="build"){
+        ns.buildings[q.id]=(ns.buildings[q.id]||0)+1;
+        const allZones=ns.continents.flatMap(c=>c.zones);
+        const alreadyPlaced=allZones.some(z=>z.building===q.id);
+        if(!alreadyPlaced){
+          const bDef=BUILDINGS.find(b=>b.id===q.id);
+          for(const cont of ns.continents){
+            const zone=cont.zones.find(z=>z.terrain&&z.terrain.buildable&&!z.building&&bDef&&bDef.terrainBonus&&bDef.terrainBonus.includes(z.type))||cont.zones.find(z=>z.terrain&&z.terrain.buildable&&!z.building);
+            if(zone){zone.building=q.id;break;}
+          }
+        }
+      }else if(q.type==="ship"){
+        ns.ships[q.id]=(ns.ships[q.id]||0)+(q.qty||1);
+      }
+      ns.zones=ns.continents.flatMap(c=>c.zones);
+      saveGS(userId,ns);onStateChange&&onStateChange(ns);
+      return ns;
+    });
+    setTimeout(()=>{try{AudioEngine.playBuildComplete&&AudioEngine.playBuildComplete();}catch(e){}},100);
+  };
+  const titles={continents:"🗺️ CONTINENTS",buildings:"🏗️ BÂTIMENTS",ships:"🛸 VAISSEAUX & FLOTTES",research:"🔬 RECHERCHE"};
+  const renderQueue=()=>{
+    const q=state.queue;
+    if(!q)return null;
+    const ready=!!q.ready;
+    const remain=Math.max(0,Math.ceil((q.finishAt-Date.now())/1000));
+    const bld=q.type==="build"?BUILDINGS.find(b=>b.id===q.id):null;
+    const ship=q.type==="ship"?SHIPS.find(s=>s.id===q.id):null;
+    const label=bld?bld.name:(ship?(ship.name+" ×"+(q.qty||1)):q.id);
+    const icon=bld?bld.icon:(ship?ship.icon:"🏗️");
+    return(<div style={{padding:"6px 10px",background:ready?"rgba(20,100,40,.25)":"rgba(10,30,80,.3)",borderBottom:"1px solid "+(ready?"#1a6030":"#0d2540"),display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
+      <span style={{fontSize:16}}>{icon}</span>
+      <div style={{flex:1,fontSize:9,color:ready?"#50d080":"#6a9adf",fontFamily:"monospace"}}>
+        {ready?"✅ "+label+" — Prêt !":"🔧 "+label+" — "+fmtT(remain)}
+      </div>
+      {ready&&<button onClick={doFinalize} style={{padding:"4px 12px",background:"linear-gradient(135deg,#1a6030,#0d4020)",border:"1px solid #2a8040",borderRadius:6,color:"#60e090",fontSize:9,cursor:"pointer",fontFamily:"monospace",fontWeight:"bold",letterSpacing:1}}>{"⚡ FINALISER"}</button>}
+    </div>);
+  };
+  const safeL="env(safe-area-inset-left,0px)",safeR="env(safe-area-inset-right,0px)";
+  return(<div style={{position:"fixed",top:0,left:0,right:0,bottom:0,zIndex:200,display:"flex",flexDirection:"column",background:"linear-gradient(160deg,#06101e,#08141f)",fontFamily:"monospace"}}>
+    <div style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",paddingLeft:"calc(14px + "+safeL+")",paddingRight:"calc(14px + "+safeR+")",borderBottom:"1px solid #1a3050",background:"rgba(6,14,28,0.98)",flexShrink:0}}>
+      <button onClick={()=>{AudioEngine.safeSoftClick&&AudioEngine.safeSoftClick();onClose();}} style={{padding:"6px 10px",borderRadius:6,background:"rgba(20,40,80,0.5)",border:"1px solid #2a5090",color:"#9abcd8",fontSize:10,cursor:"pointer",fontFamily:"monospace",letterSpacing:1,fontWeight:"bold"}}>{"← RETOUR"}</button>
+      <div style={{flex:1,fontSize:12,color:"#c8e0ff",letterSpacing:2,fontWeight:"bold"}}>{titles[section]||"SECTION"}</div>
+      <div style={{fontSize:8,color:"#5a7aa0",letterSpacing:1}}>{planet.name}</div>
+    </div>
+    <ResBar res={state.resources} bld={state.buildings} zones={state.zones} planet={planet} state={state} onSelResource={setSelResource}/>
+    {renderQueue()}
+    <div style={{flex:1,overflow:"auto",WebkitOverflowScrolling:"touch",padding:8,paddingLeft:"calc(8px + "+safeL+")",paddingRight:"calc(8px + "+safeR+")"}}>
+      {section==="buildings"&&<BuildTab state={state} planet={planet} onBuild={doBuild}/>}
+      {section==="research"&&<ResearchTab state={state} planet={planet} onResearch={doResearch}/>}
+      {section==="ships"&&<div>
+        <div style={{display:"flex",borderBottom:"1px solid #0d2035",marginBottom:8}}>
+          {[["build","🛸","Construction"],["fleet","🚀","Flottes"]].map(kif=>{
+            const k=kif[0],ic=kif[1],lbl=kif[2];
+            return(<button key={k} onClick={()=>{AudioEngine.safeSoftClick&&AudioEngine.safeSoftClick();setShipTab(k);}} style={{flex:1,padding:"8px 0",fontSize:10,border:"none",cursor:"pointer",background:"transparent",color:shipTab===k?"#c8e0ff":"#5a7aa0",fontFamily:"monospace",letterSpacing:1.5,fontWeight:shipTab===k?"bold":"normal",borderBottom:shipTab===k?"2px solid #4488cc":"2px solid transparent"}}>{ic+" "+lbl.toUpperCase()}</button>);
+          })}
+        </div>
+        {shipTab==="build"&&<ShipsTab state={state} planet={planet} onBuildShip={doShip}/>}
+        {shipTab==="fleet"&&<FleetTab state={state} planet={planet} planets={planets} myIdx={myIdx} onSend={doFleet}/>}
+      </div>}
+      {section==="continents"&&<div style={{padding:"8px 4px"}}>
+        <div style={{fontSize:9,color:"#5a7aa0",letterSpacing:1.5,marginBottom:10,padding:"0 8px",lineHeight:1.5}}>{"Tape sur une zone pour voir ses bonus. Pour construire, utilise la planète 3D."}</div>
+        <div style={{display:"flex",flexDirection:"column",gap:8,padding:"0 4px"}}>
+          {(state.continents||[]).map(cont=>{
+            const used=cont.zones.filter(z=>z.building).length;
+            return(
+              <div key={cont.id} style={{padding:"12px 14px",borderRadius:8,background:"linear-gradient(135deg,rgba(15,30,55,0.85),rgba(8,18,38,0.9))",border:"1px solid rgba(80,140,200,0.3)"}}>
+                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
+                  <div style={{fontSize:11,color:"#c8e0ff",fontWeight:"bold",letterSpacing:1.5}}>{cont.name||cont.id}</div>
+                  <span style={{fontSize:8,color:"#9abcd8",letterSpacing:1}}>{used+"/"+cont.zones.length+" ZONES OCCUPÉES"}</span>
+                </div>
+                <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+                  {cont.zones.map(z=>(
+                    <div key={z.id} onClick={()=>onOpenZoneInfo&&onOpenZoneInfo(z)} style={{padding:"5px 8px",background:z.building?"rgba(40,90,150,0.35)":"rgba(8,16,30,0.6)",border:"1px solid "+(z.building?"#3a7ac0":"#1a3050"),borderRadius:5,fontSize:9,color:z.building?"#c8e0ff":"#7a9ac0",display:"flex",alignItems:"center",gap:4,cursor:"pointer",transition:"transform 0.1s"}}>
+                      <span>{(z.terrain&&z.terrain.icon)||"◆"}</span>
+                      <span>{z.name}</span>
+                      {z.building&&<span style={{color:"#88ddaa",marginLeft:3}}>{"·"+(BUILDINGS.find(b=>b.id===z.building)||{icon:"?"}).icon}</span>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>}
+    </div>
+    {selResource&&<ResourceInfoModal type={selResource} state={{...state,planetType:planet&&planet.type}} planet={planet} onClose={()=>setSelResource(null)}/>}
+  </div>);
+}
+
+function Viewer3D({planet,allPlanets,onClose,isPlayer,owner,state,onStateChange,onManage,userId,natalState,onColonize,alreadyColonized}){
+  const[threeOk,setThreeOk]=useState(!!window.THREE);
+  const[viewTab,setViewTab]=useState("info");
+  const[hubSection,setHubSection]=useState(null); // null|"continents"|"buildings"|"ships"|"research"
+  const[selContinent,setSelContinent]=useState(null);
+  const[selBuilding,setSelBuilding]=useState(null);
+  const[selZoneMarker,setSelZoneMarker]=useState(null);
+  const[selHubZoneInfo,setSelHubZoneInfo]=useState(null); // hoisted zone info modal from HubSection
+  const[focusMode,setFocusMode]=useState(false);
+  const[showBonusModal,setShowBonusModal]=useState(false);
+  const[now,setNow]=useState(Date.now());
+  useEffect(()=>{const t=setInterval(()=>setNow(Date.now()),1000);return()=>clearInterval(t);},[]);
+  // Safety: if viewTab points to a tab that no longer exists, reset to "info"
+  useEffect(()=>{
+    if(viewTab!=="info"&&viewTab!=="hub")setViewTab("info");
+  },[viewTab]);
+  useEffect(()=>{
+    if(window.THREE){setThreeOk(true);return;}
+    const s=document.createElement("script");
+    s.src=["https","//cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"].join(":");
+    s.onload=()=>setThreeOk(true);
+    document.head.appendChild(s);
+  },[]);
+  useEffect(()=>{
+    const f=e=>{if(e.key==="Escape")onClose();};
+    window.addEventListener("keydown",f);
+    return()=>window.removeEventListener("keydown",f);
+  },[onClose]);
+  const zones=state&&state.zones||[];
+  const hab=habOf(planet);
+  const[c1]=gc(planet.type);
+  const conts=state&&state.continents?state.continents:(planet?generateContinents(planet):[]);
+  const q=state&&state.queue;
+  const qActive=!!q;
+  const qRemain=q?Math.max(0,q.finishAt-now):0;
+  const qReady=!!q&&Date.now()>=q.finishAt;
+  const qBDef=qActive&&BUILDINGS.find(b=>b.id===q.id);
+  const handleFinalize=()=>{
+    if(!state||!state.queue)return;
+    const qq=state.queue;
+    let ns={...state,buildings:{...state.buildings},ships:{...state.ships},continents:(state.continents||[]).map(c=>({...c,zones:[...c.zones]})),queue:null};
+    if(qq.type==="build"){
+      ns.buildings[qq.id]=(ns.buildings[qq.id]||0)+1;
+      const allZones=ns.continents.flatMap(c=>c.zones);
+      const alreadyPlaced=allZones.some(z=>z.building===qq.id);
+      if(!alreadyPlaced){
+        const bDef2=BUILDINGS.find(b=>b.id===qq.id);
+        const findFn=(predicate)=>{
+          for(let i=0;i<ns.continents.length;i++){
+            const zi=ns.continents[i].zones.findIndex(predicate);
+            if(zi>=0)return{ci:i,zi:zi};
+          }
+          return null;
+        };
+        const bonusLoc=bDef2&&bDef2.terrainBonus?findFn(z=>!z.building&&bDef2.terrainBonus.includes(z.type)):null;
+        const anyLoc=findFn(z=>!z.building);
+        const loc=bonusLoc||anyLoc;
+        if(loc)ns.continents[loc.ci].zones[loc.zi]={...ns.continents[loc.ci].zones[loc.zi],building:qq.id};
+      }
+      ns.zones=ns.continents.flatMap(c=>c.zones);
+    }
+    if(qq.type==="ship")ns.ships[qq.id]=(ns.ships[qq.id]||0)+(qq.count||1);
+    onStateChange&&onStateChange(ns);
+    setTimeout(()=>{try{AudioEngine.playBuildComplete&&AudioEngine.playBuildComplete();}catch(e){}},100);
+  };
+  const handleBuildingClick=(buildingId,zoneId)=>{
+    const bld=BUILDINGS.find(b=>b.id===buildingId);
+    const zone=(state&&state.zones||[]).find(z=>z.id===zoneId);
+    if(bld&&zone)setSelBuilding({bld,zone,lv:(state&&state.buildings&&state.buildings[buildingId]||0)});
+  };
+  const handleContinentClick=(contId)=>{
+    const cont=(conts||[]).find(c=>c.id===contId);
+    if(cont)setSelContinent(cont);
+    // Track mission flag for "openedContinent" + "openedAllContinents"
+    if(isPlayer&&state&&onStateChange){
+      const flags=state.missionFlags||{};
+      const openedSet=new Set(flags.openedContinentIds||[]);
+      openedSet.add(cont.id);
+      const allContinents=(state.continents||[]).length;
+      const openedAll=allContinents>0&&openedSet.size>=allContinents;
+      const updates={};
+      if(!flags.openedContinent)updates.openedContinent=true;
+      if(openedSet.size!==(flags.openedContinentIds||[]).length)updates.openedContinentIds=Array.from(openedSet);
+      if(openedAll&&!flags.openedAllContinents)updates.openedAllContinents=true;
+      if(Object.keys(updates).length>0){
+        onStateChange({...state,missionFlags:{...flags,...updates}});
+      }
+    }
+  };
+  const handleBuildInZone=(zone,bld,lv)=>{
+    if(!onStateChange||!state)return;
+    const cost=bCost(bld,lv,planet);
+    const rl2=(state.buildings&&state.buildings.usine_robots)||0;
+    const secs=bTime(bld,lv,rl2,planet,state,state&&state.zones);
+    const nc=(state.continents||[]).map(c=>({...c,zones:c.zones.map(z=>z.id===zone.id?{...z,building:bld.id}:z)}));
+    onStateChange({...state,resources:deduct(state.resources,cost),queue:{type:"build",id:bld.id,startAt:Date.now(),finishAt:Date.now()+secs*1000},continents:nc,zones:nc.flatMap(c=>c.zones)});
+    setSelContinent(null);
+  };
+  const handleZoneMarkerClick=(zone)=>{
+    AudioEngine.safeSoftClick&&AudioEngine.safeSoftClick();
+    setSelZoneMarker(zone);
+  };
+  const handleUpgrade=(b,lv2)=>{
+    if(!onStateChange||!state)return;
+    const cost=bCost(b,lv2,planet);
+    const secs=bTime(b,lv2,state.buildings.usine_robots||0,planet,state,state&&state.zones);
+    onStateChange({...state,resources:deduct(state.resources,cost),queue:{type:"build",id:b.id,startAt:Date.now(),finishAt:Date.now()+secs*1000}});
+  };
+  const safeL="env(safe-area-inset-left,0px)",safeR="env(safe-area-inset-right,0px)";
+  const outerSt={position:"fixed",top:0,left:0,right:0,bottom:0,zIndex:150,display:"flex",flexDirection:"column",background:"#020810"};
+  const hdrSt={display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 14px",paddingLeft:"calc(14px + "+safeL+")",paddingRight:"calc(14px + "+safeR+")",background:"linear-gradient(180deg,rgba(6,14,28,0.98),rgba(4,10,20,0.98))",flexShrink:0,borderBottom:"1px solid #1a4060"};
+  const btnSt={padding:"5px 11px",background:"rgba(20,40,80,0.5)",border:"1px solid #1a4060",color:"#9abcd8",borderRadius:5,cursor:"pointer",fontSize:10,fontFamily:"monospace",letterSpacing:1.5};
+  const bodySt={flex:1,display:"flex",overflow:"hidden",minHeight:0};
+  const globeSt={flex:focusMode?"1 1 100%":"0 0 58%",position:"relative",overflow:"hidden"};
+  // Right panel: padded with safe-area-right so content (tabs, info, actions) is not hidden by Dynamic Island
+  const panelSt={flex:"0 0 42%",borderLeft:"1px solid #1a4060",overflow:"hidden",display:"flex",flexDirection:"column",display:focusMode?"none":"flex",background:"linear-gradient(180deg,rgba(6,12,26,0.95),rgba(3,8,18,0.98))",paddingRight:safeR};
+  const scrollSt={height:"100%",overflowY:"scroll",overflowX:"hidden",display:"flex",flexDirection:"column",gap:0};
+  const tabRowSt={display:"flex",gap:0,background:"rgba(4,10,22,0.95)",flexShrink:0,borderBottom:"1px solid #1a4060"};
+  const noLoadSt={display:"flex",alignItems:"center",justifyContent:"center",height:"100%",color:"#2a4a70",fontFamily:"monospace",fontSize:11,letterSpacing:2};
+  const _fsClick=()=>setFocusMode(f=>!f);
+  return(<div style={outerSt}>
+    <div style={hdrSt}>
+      <div style={{display:"flex",alignItems:"center",gap:8,flex:1,minWidth:0}}>
+        <div style={{width:6,height:6,borderRadius:"50%",background:isPlayer?"#44ff88":planet.isWild?"#ddeeff":"#8a8aaa",boxShadow:"0 0 6px "+(isPlayer?"#44ff88":planet.isWild?"#ddeeff":"#8a8aaa"),flexShrink:0}}/>
+        <span style={{fontFamily:"'Share Tech Mono',monospace",fontSize:15,color:"#c8e0ff",letterSpacing:3,fontWeight:"bold"}}>{(state&&state.planetName)||planet.name}</span>
+        <span style={{fontSize:9,color:"#6a8ab0",letterSpacing:1.5,fontFamily:"monospace",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
+          {planet.type}
+          {PLANET_PASSIVE_BONUS[planet.type]?" · "+PLANET_PASSIVE_BONUS[planet.type].label:""}
+          {isPlayer?" ":""}
+          {isPlayer&&<span style={{color:"#ffc870"}}>★</span>}
+          {owner?" · 👤"+owner:""}
+          {planet.isWild&&<span style={{color:"#aaccee",marginLeft:6,padding:"1px 5px",border:"1px dashed #5a7aa0",borderRadius:3,fontSize:8,letterSpacing:1.5,fontWeight:"bold"}}>{"🌱 SAUVAGE"}</span>}
+        </span>
+      </div>
+      <div style={{display:"flex",gap:6,flexShrink:0}}>
+        <button onClick={_fsClick} style={btnSt}>{focusMode?"⛶ Panneau":"⛶"}</button>
+        <button onClick={onClose} style={btnSt}>{"×"}</button>
+      </div>
+    </div>
+    <div style={bodySt}>
+      <div style={globeSt}>{threeOk?<Planet3D
+          planet={planet}
+          allPlanets={allPlanets}
+          zones={isPlayer?zones:null}
+          continents={conts}
+          isMyPlanet={true}
+          fs={false}
+          onBuildingClick={isPlayer?handleBuildingClick:null}
+          buildings={isPlayer&&state?state.buildings:null}
+          queue={isPlayer&&state?state.queue:null}
+          onContinentClick={handleContinentClick}/>
+        :<div style={noLoadSt}>{"◆ CHARGEMENT ◆"}</div>}
+      </div>
+      <div style={panelSt}>
+        <div style={scrollSt}>
+          {isPlayer&&<div style={tabRowSt}>
+            {[["info","📊","Infos"],["hub","⚡","Actions"]].map((tb)=>(
+              <button key={tb[0]}
+                onClick={()=>setViewTab(tb[0])}
+                style={{
+                  flex:1,padding:"10px 0",fontSize:10,
+                  border:"none",cursor:"pointer",
+                  background:viewTab===tb[0]?"linear-gradient(180deg,rgba(30,80,140,0.25),rgba(15,50,100,0.35))":"transparent",
+                  color:viewTab===tb[0]?"#c8e0ff":"#4a6a90",
+                  fontFamily:"monospace",letterSpacing:2,fontWeight:viewTab===tb[0]?"bold":"normal",
+                  borderBottom:viewTab===tb[0]?"2px solid #4488cc":"2px solid transparent",
+                  transition:"all 0.15s"
+                }}>
+                {tb[1]}  {tb[2].toUpperCase()}
+              </button>))}
+          </div>}
+          {qActive&&(<div style={{margin:"8px 10px",padding:"10px 12px",borderRadius:6,background:"linear-gradient(135deg,rgba(10,25,60,0.85),rgba(6,16,40,0.95))",border:"1px solid "+(qReady?"#44aa66":"#3a6090"),boxShadow:qReady?"0 0 15px rgba(68,170,102,0.35)":"0 0 10px rgba(40,90,150,0.25)"}}>
+            {qReady?<button onClick={handleFinalize} style={{width:"100%",padding:"8px",borderRadius:5,border:"1px solid #44aa66",cursor:"pointer",background:"linear-gradient(180deg,rgba(60,150,90,0.5),rgba(30,90,60,0.5))",color:"#d0ffd8",fontFamily:"monospace",fontSize:10,letterSpacing:2,fontWeight:"bold"}}>
+                {"✓ TERMINER : "+(qBDef&&qBDef.name).toUpperCase()}
+              </button>
+              :<div>
+                <div style={{fontSize:8,color:"#6a8ab0",letterSpacing:2,marginBottom:4,fontFamily:"monospace"}}>CONSTRUCTION EN COURS</div>
+                <div style={{fontSize:11,color:"#c8e0ff",fontFamily:"monospace",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                  <span>🔧 {qBDef&&qBDef.name}</span>
+                  <span style={{color:"#9adda0"}}>{Math.floor(qRemain/3600000)}{"h"}{String(Math.floor((qRemain%3600000)/60000)).padStart(2,"0")}{"m"}{String(Math.floor((qRemain%60000)/1000)).padStart(2,"0")}{"s"}</span>
+                </div>
+              </div>}
+          </div>)}
+          {viewTab==="info"&&(<div style={{padding:"12px 14px"}}>
+            {/* Colonization panel — only for wild planets, and only when natal state is available */}
+            {planet.isWild&&natalState&&onColonize&&(()=>{
+              const qgLv=(natalState.buildings&&natalState.buildings.qg)||0;
+              const empire=natalState.empire||[];
+              const existingColonies=empire.length;
+              const maxCol=maxColoniesFor(qgLv);
+              const hasShip=((natalState.ships||{}).colonisateur||0)>=1;
+              const hasTech=getTechLevel(natalState,"tech_colonization")>=1;
+              const atMax=existingColonies>=maxCol;
+              const qgTooLow=maxCol===0;
+              const canColonize=!alreadyColonized&&!qgTooLow&&!atMax&&hasTech&&hasShip;
+              let lockReason=null;
+              if(alreadyColonized)lockReason="Planète déjà colonisée";
+              else if(qgTooLow)lockReason="QG Niv 5 requis (actuel : "+qgLv+")";
+              else if(!hasTech)lockReason="Tech « Colonisation » requise";
+              else if(!hasShip)lockReason="Vaisseau Colonisateur requis";
+              else if(atMax)lockReason="Limite de colonies atteinte ("+existingColonies+"/"+maxCol+")";
+              // Terrain preview — summarize the planet's 4 zones
+              const prevContinents=generateContinents(planet);
+              const prevZones=prevContinents.flatMap(c=>c.zones);
+              const terrainCounts={};
+              prevZones.forEach(z=>{const k=(z.terrain&&z.terrain.name)||"?";terrainCounts[k]=(terrainCounts[k]||0)+1;});
+              return(
+                <div style={{marginBottom:14,padding:"10px 12px",borderRadius:6,background:alreadyColonized?"linear-gradient(135deg,rgba(40,90,60,0.3),rgba(20,60,40,0.4))":"linear-gradient(135deg,rgba(60,100,160,0.3),rgba(30,60,110,0.4))",border:"1px solid "+(alreadyColonized?"rgba(100,200,140,0.5)":"rgba(120,180,240,0.4)")}}>
+                  <div style={{fontSize:8,color:alreadyColonized?"#88dd99":"#aaccee",letterSpacing:2,marginBottom:6,fontFamily:"monospace",fontWeight:"bold"}}>
+                    {alreadyColonized?"✓ COLONIE ÉTABLIE":"🌱 PLANÈTE COLONISABLE"}
+                  </div>
+                  {alreadyColonized?(
+                    <div style={{fontSize:10,color:"#bfe8cc",lineHeight:1.5}}>{"Tu as déjà colonisé cette planète. Gère-la depuis le menu Empire."}</div>
+                  ):(
+                    <div>
+                      {/* Terrain preview */}
+                      <div style={{marginBottom:8,padding:"6px 8px",background:"rgba(10,25,50,0.4)",borderRadius:4}}>
+                        <div style={{fontSize:8,color:"#88a0c0",letterSpacing:1.5,marginBottom:4,fontFamily:"monospace"}}>{"🗺️ RELEVÉ TERRAIN (4 ZONES)"}</div>
+                        <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+                          {Object.entries(terrainCounts).map(([name,n])=>{
+                            const t=Object.values(TERRAIN_TYPES).find(tt=>tt.name===name)||{icon:"◆",color:"#888"};
+                            return(
+                              <span key={name} style={{fontSize:9,padding:"2px 6px",background:t.color+"22",border:"1px solid "+t.color+"55",borderRadius:3,color:t.color,fontFamily:"monospace"}}>
+                                {t.icon+" "+name+(n>1?" ×"+n:"")}
+                              </span>
+                            );
+                          })}
+                        </div>
+                      </div>
+                      <div style={{fontSize:9,color:"#c8d8ee",lineHeight:1.5,marginBottom:8}}>{"Un Vaisseau Colonisateur sera consommé pour fonder cette colonie. Elle démarrera avec 1 000 ⛏️ / 600 💎 / 200 ⚗️."}</div>
+                      {/* Requirements checklist */}
+                      <div style={{fontSize:9,fontFamily:"monospace",marginBottom:8}}>
+                        <div style={{color:qgLv>=5?"#88dd99":"#d06060",marginBottom:2}}>{(qgLv>=5?"✓":"✗")+" QG Niv 5+ ("+qgLv+")"}</div>
+                        <div style={{color:hasTech?"#88dd99":"#d06060",marginBottom:2}}>{(hasTech?"✓":"✗")+" Tech Colonisation"}</div>
+                        <div style={{color:hasShip?"#88dd99":"#d06060",marginBottom:2}}>{(hasShip?"✓":"✗")+" Vaisseau Colonisateur ("+((natalState.ships||{}).colonisateur||0)+")"}</div>
+                        <div style={{color:!atMax?"#88dd99":"#d06060"}}>{(!atMax?"✓":"✗")+" Emplacement colonie ("+existingColonies+"/"+maxCol+")"}</div>
+                      </div>
+                      <button onClick={()=>{if(canColonize)onColonize();}} disabled={!canColonize} style={{width:"100%",padding:"9px 0",borderRadius:5,border:"1px solid "+(canColonize?"rgba(100,180,255,0.6)":"#1a3050"),cursor:canColonize?"pointer":"not-allowed",background:canColonize?"linear-gradient(180deg,rgba(80,140,220,0.55),rgba(40,90,170,0.55))":"rgba(20,30,50,0.5)",color:canColonize?"#e0f0ff":"#4a6080",fontFamily:"monospace",fontSize:10,letterSpacing:2,fontWeight:"bold"}}>
+                        {canColonize?"🚀 FONDER LA COLONIE":lockReason.toUpperCase()}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+            {/* Passive bonus — clickable card, keeps the gold accent. Shows modulated value. */}
+            {PLANET_PASSIVE_BONUS[planet.type]&&(()=>{
+              const passiveEff=getPassiveBonus(planet);
+              const base=PLANET_PASSIVE_BONUS[planet.type];
+              const keys=Object.keys(base).filter(k=>k!=="label");
+              const RES_LABEL_FR={metal:"Métal",crystal:"Cristal",deut:"Deutérium",energy:"Énergie"};
+              const RES_ICON_SM={metal:"⛏",crystal:"💎",deut:"⚗",energy:"⚡"};
+              // Build a display label from the modulated values
+              const labelText=keys.map(k=>RES_ICON_SM[k]+" "+RES_LABEL_FR[k]+" +"+Math.round(passiveEff[k]*100)+"%").join(" · ");
+              return(
+                <button onClick={()=>setShowBonusModal(true)} style={{display:"flex",alignItems:"center",gap:10,padding:"9px 12px",borderRadius:6,background:"linear-gradient(135deg,rgba(60,40,10,.35),rgba(30,22,6,.55))",border:"1px solid rgba(200,160,90,0.45)",marginBottom:10,cursor:"pointer",width:"100%",fontFamily:"inherit",textAlign:"left",transition:"all 0.15s",boxShadow:"0 0 10px rgba(200,160,90,0.12)"}} onMouseDown={e=>e.currentTarget.style.transform="scale(0.98)"} onMouseUp={e=>e.currentTarget.style.transform=""} onMouseLeave={e=>e.currentTarget.style.transform=""}>
+                  <span style={{fontSize:16,color:"#ffc870",flexShrink:0}}>✦</span>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontSize:8,color:"#b89858",fontFamily:"monospace",letterSpacing:2,marginBottom:2}}>BONUS PLANÉTAIRE</div>
+                    <div style={{fontSize:11,color:"#ffdca0",fontFamily:"'Share Tech Mono',monospace",letterSpacing:1,fontWeight:"bold"}}>{labelText.toUpperCase()}</div>
+                  </div>
+                  <span style={{fontSize:12,color:"#b89858",opacity:0.7,flexShrink:0}}>ⓘ</span>
+                </button>
+              );
+            })()}
+
+            {/* Habitability — prominent HUD card with construction cost modifier */}
+            <div style={{padding:"10px 12px",borderRadius:6,background:"linear-gradient(135deg,rgba(10,25,60,.7),rgba(6,16,40,.9))",border:"1px solid "+hab.c+"55",marginBottom:14,boxShadow:"0 0 14px "+hab.c+"22",position:"relative"}}>
+              <div style={{position:"absolute",top:8,left:10,fontSize:8,color:"#6a8ab0",fontFamily:"monospace",letterSpacing:2}}>HABITABILITÉ</div>
+              <div style={{textAlign:"center",padding:"14px 0 6px"}}>
+                <div style={{fontSize:17,color:hab.c,fontFamily:"'Share Tech Mono',monospace",fontWeight:"bold",letterSpacing:3}}>{hab.l.toUpperCase()}</div>
+              </div>
+              {(()=>{const m=habMultiplier(planet);if(m===1)return null;const pct=Math.round((m-1)*100);const isGood=pct<0;return(
+                <div style={{display:"flex",justifyContent:"center",marginTop:4,paddingTop:8,borderTop:"1px dashed rgba(40,80,130,0.3)"}}>
+                  <span style={{fontSize:9,color:isGood?"#7adda0":"#ffa060",fontFamily:"monospace",letterSpacing:1}}>{"⚙ CONSTRUCTION "+(isGood?"":"+ ")+pct+"% coût & temps"}</span>
+                </div>
+              );})()}
+            </div>
+
+            {/* Identity — data table, HUD-style */}
+            <div style={{marginBottom:14,padding:"10px 12px",borderRadius:6,background:"rgba(8,16,30,0.5)",border:"1px solid rgba(40,80,130,0.25)"}}>
+              <div style={{fontSize:8,color:"#4a88cc",letterSpacing:2.5,marginBottom:8,fontFamily:"monospace",display:"flex",alignItems:"center",gap:6}}><span style={{width:12,height:1,background:"#2a5080"}}></span>IDENTITÉ<span style={{flex:1,height:1,background:"#2a5080"}}></span></div>
+              {[
+                ["TYPE",planet.type],
+                ["DISTANCE","UA "+planet.dist],
+                ["SUPERFICIE",planet.size.toLocaleString()+" km²"],
+                ["LUNES",planet.moonsUnlocked?(planet.moons||0):"🔒 Verrouillé"],
+                ["ANNEAUX",planet.hasRings?(planet.ringsUnlocked?"Oui":"🔒 Verrouillé"):"Aucun"],
+              ].map((row,i,arr)=>(
+                <div key={row[0]} style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:10,padding:"5px 0",borderBottom:i<arr.length-1?"1px dashed rgba(40,80,130,0.18)":"none"}}>
+                  <span style={{color:"#6a8ab0",fontFamily:"monospace",letterSpacing:1.5,fontSize:9}}>{row[0]}</span>
+                  <span style={{color:"#c8e0ff",fontFamily:"'Share Tech Mono',monospace",fontSize:10}}>{row[1]}</span>
+                </div>
+              ))}
+            </div>
+
+            {/* Climate — color-coded values */}
+            <div style={{marginBottom:14,padding:"10px 12px",borderRadius:6,background:"rgba(8,16,30,0.5)",border:"1px solid rgba(40,80,130,0.25)"}}>
+              <div style={{fontSize:8,color:"#4a88cc",letterSpacing:2.5,marginBottom:8,fontFamily:"monospace",display:"flex",alignItems:"center",gap:6}}><span style={{width:12,height:1,background:"#2a5080"}}></span>CLIMAT<span style={{flex:1,height:1,background:"#2a5080"}}></span></div>
+              {[
+                ["TEMPÉRATURE",(planet.temp>0?"+":"")+planet.temp+"°C",planet.temp>60||planet.temp<-50?"#e08a50":planet.temp>-20&&planet.temp<60?"#7adda0":"#e8c878"],
+                ["EAU",planet.water+"%",planet.water>20&&planet.water<80?"#5ab8d8":"#8ab0cc"],
+                ["ATMOSPHÈRE",planet.atmos||"Aucune",planet.atmos==="Respirable"?"#7adda0":"#8ab0cc"],
+                ["LUMINOSITÉ",planet.light+"%",planet.light>20&&planet.light<80?"#e8c878":"#8ab0cc"],
+              ].map((row,i,arr)=>(
+                <div key={row[0]} style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:10,padding:"5px 0",borderBottom:i<arr.length-1?"1px dashed rgba(40,80,130,0.18)":"none"}}>
+                  <span style={{color:"#6a8ab0",fontFamily:"monospace",letterSpacing:1.5,fontSize:9}}>{row[0]}</span>
+                  <span style={{color:row[2]||"#c8e0ff",fontFamily:"'Share Tech Mono',monospace",fontSize:10,fontWeight:"bold"}}>{row[1]}</span>
+                </div>
+              ))}
+            </div>
+
+            {/* Resources — only shown for player's own planet */}
+            {isPlayer&&state&&(
+              <div style={{marginBottom:8,padding:"10px 12px",borderRadius:6,background:"rgba(8,16,30,0.5)",border:"1px solid rgba(40,80,130,0.25)"}}>
+                <div style={{fontSize:8,color:"#4a88cc",letterSpacing:2.5,marginBottom:8,fontFamily:"monospace",display:"flex",alignItems:"center",gap:6}}><span style={{width:12,height:1,background:"#2a5080"}}></span>RESSOURCES<span style={{flex:1,height:1,background:"#2a5080"}}></span></div>
+                {[
+                  ["⛏️","MÉTAL",state.resources.metal,"#c8e0ff"],
+                  ["💎","CRISTAL",state.resources.crystal,"#7adfe8"],
+                  ["⚗️","DEUTÉRIUM",state.resources.deut,"#9adda0"]
+                ].map((r,i,arr)=>(
+                  <div key={r[1]} style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:10,padding:"6px 0",borderBottom:i<arr.length-1?"1px dashed rgba(40,80,130,0.18)":"none"}}>
+                    <span style={{color:"#6a8ab0",fontFamily:"monospace",letterSpacing:1.5,fontSize:9,display:"flex",alignItems:"center",gap:6}}><span style={{fontSize:13}}>{r[0]}</span>{r[1]}</span>
+                    <span style={{color:r[3],fontFamily:"'Share Tech Mono',monospace",fontSize:12,fontWeight:"bold"}}>{fmt(r[2])}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>)}
+          {viewTab==="hub"&&isPlayer&&state&&(<div style={{padding:"12px 12px",display:"flex",flexDirection:"column",gap:8}}>
+              <div style={{fontSize:8,color:"#4a88cc",letterSpacing:2.5,marginBottom:4,fontFamily:"monospace",display:"flex",alignItems:"center",gap:6}}>
+                <span style={{width:12,height:1,background:"#2a5080"}}></span>
+                CENTRE DE COMMANDEMENT
+                <span style={{flex:1,height:1,background:"#2a5080"}}></span>
+              </div>
+              {(()=>{
+                const builtCount=BUILDINGS.filter(b=>(state.buildings[b.id]||0)>0).length;
+                const totalShips=Object.values(state.ships||{}).reduce((a,b)=>a+b,0);
+                const fleetCount=(state.fleets||[]).length;
+                const labLv=(state.buildings&&state.buildings.laboratoire)||0;
+                const researching=state.researchQueue?1:0;
+                const totalZones=(state.zones||[]).length;
+                const usedZones=(state.zones||[]).filter(z=>z.building).length;
+                const cards=[
+                  {id:"continents",icon:"🗺️",title:"Continents",sub:totalZones+" zones · "+(totalZones-usedZones)+" libres",color:"#6ab8d8"},
+                  {id:"buildings",icon:"🏗️",title:"Bâtiments",sub:builtCount+"/"+BUILDINGS.length+" construits",color:"#d8a070"},
+                  {id:"ships",icon:"🛸",title:"Vaisseaux & Flottes",sub:totalShips+" vaisseaux · "+fleetCount+" en mission",color:"#a070d8"},
+                  {id:"research",icon:"🔬",title:"Recherche",sub:labLv>0?"Labo Niv "+labLv+(researching?" · 1 active":""):"Pas de laboratoire",color:"#70d8b8"},
+                ];
+                return cards.map(c=>(
+                  <button key={c.id} onClick={()=>{AudioEngine.safeClick&&AudioEngine.safeClick();setHubSection(c.id);}} style={{width:"100%",padding:"14px 14px",borderRadius:9,background:"linear-gradient(135deg,rgba(15,30,55,0.85),rgba(8,18,38,0.9))",border:"1px solid "+c.color+"55",cursor:"pointer",display:"flex",alignItems:"center",gap:14,transition:"all 0.15s",textAlign:"left",fontFamily:"monospace"}}>
+                    <span style={{fontSize:30,filter:"drop-shadow(0 0 8px "+c.color+"66)",flexShrink:0}}>{c.icon}</span>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontSize:12,color:"#fff",fontWeight:"bold",letterSpacing:1.5,marginBottom:3}}>{c.title}</div>
+                      <div style={{fontSize:9,color:"#9abcd8",letterSpacing:1}}>{c.sub}</div>
+                    </div>
+                    <span style={{fontSize:18,color:c.color,opacity:0.7}}>{"›"}</span>
+                  </button>
+                ));
+              })()}
+            </div>)}
+          {viewTab==="zones"&&(<div style={{padding:"10px 12px"}}>
+              <div style={{fontSize:8,color:"#4a88cc",letterSpacing:2.5,marginBottom:10,fontFamily:"monospace",display:"flex",alignItems:"center",gap:6}}>
+                <span style={{width:12,height:1,background:"#2a5080"}}></span>
+                SECTEURS DÉTECTÉS
+                <span style={{flex:1,height:1,background:"#2a5080"}}></span>
+                <span style={{color:"#6a8ab0"}}>{zones.length}</span>
+              </div>
+              {zones.map(z=>{
+                const bDef=z.building&&BUILDINGS.find(b=>b.id===z.building);
+                return(<div key={z.id}
+                    onClick={()=>{AudioEngine.safeSoftClick&&AudioEngine.safeSoftClick();setSelZoneMarker(z);}}
+                    style={{marginBottom:6,padding:"8px 10px",borderRadius:5,background:"linear-gradient(135deg,rgba(10,20,40,0.7),rgba(6,12,26,0.85))",border:"1px solid "+(bDef?"rgba(68,170,102,0.35)":"rgba(40,80,130,0.3)"),cursor:"pointer",display:"flex",alignItems:"center",gap:8,transition:"all 0.15s"}}>
+                    <span style={{fontSize:16,filter:"drop-shadow(0 0 4px rgba(100,170,230,0.4))"}}>{z.terrain&&z.terrain.icon||"🌍"}</span>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontSize:10,color:"#c8e0ff",fontFamily:"'Share Tech Mono',monospace",letterSpacing:1,fontWeight:"bold"}}>{z.name}</div>
+                      <div style={{fontSize:8,color:"#6a8ab0",fontFamily:"monospace",letterSpacing:1.5,marginTop:1}}>{(z.type||"").toUpperCase()}</div>
+                    </div>
+                    {bDef&&<div style={{display:"flex",alignItems:"center",gap:5,padding:"3px 8px",background:"rgba(40,90,50,0.3)",border:"1px solid rgba(80,160,90,0.35)",borderRadius:3}}>
+                      <span style={{fontSize:11}}>{bDef.icon}</span>
+                      <span style={{fontSize:8,color:"#9adda0",fontFamily:"monospace",letterSpacing:1,fontWeight:"bold"}}>{"LV"+(state&&state.buildings[bDef.id]||0)}</span>
+                    </div>}
+                  </div>);
+              })}
+            </div>)}
+          {isPlayer&&(<div style={{padding:"10px 12px",marginTop:"auto",flexShrink:0,display:"flex",flexDirection:"column",gap:6,borderTop:"1px solid rgba(40,80,130,0.25)"}}>
+              <button onClick={onClose} style={_vs5}>{"FERMER"}</button>
+            </div>)}
+        </div>
+      </div>
+    </div>
+    {selBuilding&&<BuildingInfoModal
+        bld={selBuilding.bld}
+        zone={selBuilding.zone}
+        lv={selBuilding.lv}
+        state={state}
+        planet={planet}
+        onUpgrade={handleUpgrade}
+        onClose={()=>setSelBuilding(null)}/>}
+    {selZoneMarker&&<ZoneInfoModal zone={selZoneMarker} onClose={()=>setSelZoneMarker(null)}/>}
+    {selContinent&&<ContinentModal continent={selContinent} planet={planet} state={state||{planetType:planet&&planet.type,buildings:{},resources:{metal:0,crystal:0,deut:0},continents:conts}} onBuildInZone={isPlayer?handleBuildInZone:()=>{}} onClose={()=>setSelContinent(null)} readOnly={!isPlayer}/>}
+    {showBonusModal&&<PlanetBonusesModal currentType={planet&&planet.type} onClose={()=>setShowBonusModal(false)}/>}
+    {hubSection&&isPlayer&&state&&userId&&<HubSection section={hubSection} planet={planet} userId={userId} planets={allPlanets} myIdx={planet&&planet.i} initialState={state} onStateChange={onStateChange} onClose={()=>setHubSection(null)} onOpenZoneInfo={z=>setSelHubZoneInfo(z)}/>}
+    {selHubZoneInfo&&<ZoneInfoModal zone={selHubZoneInfo} onClose={()=>setSelHubZoneInfo(null)}/>}
+  </div>);
+}
+
+
+function ResBar({res,bld,zones,planet,state,onSelResource}){
+  const ratio=eRatio(bld,planet,state,zones),ep=eProd(bld.centrale||0,planet,state,zones),en=eNeed(bld);
+  const ec=ratio<0.5?"#ff7050":ratio<1?"#ffcc40":"#7adda0";
+  const tb=getTerrainBonuses(zones||[],planet);
+  const clickable=!!onSelResource;
+  const handleClick=(k)=>{if(onSelResource){AudioEngine.safeSoftClick&&AudioEngine.safeSoftClick();onSelResource(k);}};
+  return(<div style={{display:"flex",gap:12,flexWrap:"wrap",padding:"7px 12px",paddingLeft:"calc(12px + env(safe-area-inset-left,0px))",paddingRight:"calc(12px + env(safe-area-inset-right,0px))",background:"linear-gradient(180deg,rgba(6,14,28,0.98),rgba(4,10,22,0.98))",borderBottom:"1px solid #1a4060",fontFamily:"monospace",fontSize:10,alignItems:"center",flexShrink:0,letterSpacing:0.5}}>
+      {[["⛏️",res.metal,"#c8e0ff",tb.metal,"metal"],["💎",res.crystal,"#7adfe8",tb.crystal,"crystal"],["⚗️",res.deut,"#9adda0",tb.deut,"deut"]].map(([ic,v,c,bon,k])=>(
+        <div key={ic} onClick={clickable?()=>handleClick(k):undefined} style={{display:"flex",alignItems:"center",gap:5,cursor:clickable?"pointer":"default",padding:clickable?"2px 4px":0,borderRadius:4,transition:"background 0.15s"}}>
+          <span style={{fontSize:12}}>{ic}</span>
+          <span style={{color:c,fontWeight:"bold",fontFamily:"'Share Tech Mono',monospace",fontSize:11}}>{fmt(v)}</span>
+          {bon>0&&<span style={{fontSize:8,color:"#9adda0",padding:"1px 5px",background:"rgba(40,90,50,0.3)",border:"1px solid rgba(80,160,90,0.3)",borderRadius:2,letterSpacing:0.5,fontWeight:"bold"}}>{"+"+Math.round(bon*100)+"%"}</span>}
+        </div>
+      ))}
+      <div onClick={clickable?()=>handleClick("energy"):undefined} style={{display:"flex",alignItems:"center",gap:5,marginLeft:"auto",cursor:clickable?"pointer":"default",padding:clickable?"2px 4px":0,borderRadius:4}}>
+        <span style={{fontSize:12}}>⚡</span>
+        <span style={{color:ec,fontFamily:"'Share Tech Mono',monospace",fontWeight:"bold",fontSize:11}}>{ep+"/"+en}</span>
+        {ratio<1&&<span style={{color:"#ff9050",fontSize:8,padding:"1px 5px",background:"rgba(120,50,20,0.3)",border:"1px solid rgba(200,100,50,0.35)",borderRadius:2,letterSpacing:0.5,fontWeight:"bold"}}>{Math.round(ratio*100)+"%"}</span>}
+      </div>
+    </div>
+  );
+}
+
+function ResearchTab({state,planet,onResearch}){
+  const labLv=(state&&state.buildings&&state.buildings.laboratoire)||0;
+  const queue=state&&state.researchQueue;
+  const [now,setNow]=useState(Date.now());
+  useEffect(()=>{const t=setInterval(()=>setNow(Date.now()),1000);return()=>clearInterval(t);},[]);
+  if(labLv<1){
+    return(
+      <div style={{padding:"20px 18px",textAlign:"center",color:"#5a7aa0",fontFamily:"monospace"}}>
+        <div style={{fontSize:44,marginBottom:12,opacity:0.5}}>{"🔬"}</div>
+        <div style={{fontSize:13,color:"#9abcd8",marginBottom:8,fontWeight:"bold",letterSpacing:1}}>{"Aucun laboratoire détecté"}</div>
+        <div style={{fontSize:10,lineHeight:1.6,maxWidth:340,margin:"0 auto 14px"}}>{"Construis un Laboratoire (onglet Bâtiments) pour débloquer la recherche technologique."}</div>
+        <div style={{maxWidth:340,margin:"0 auto",padding:"10px 12px",background:"rgba(20,35,60,0.5)",border:"1px solid #1a3050",borderRadius:6,textAlign:"left"}}>
+          <div style={{fontSize:9,color:"#88b0dd",letterSpacing:1,fontWeight:"bold",marginBottom:6}}>{"💡 APERÇU DU SYSTÈME"}</div>
+          <div style={{fontSize:9,color:"#7a9ac0",lineHeight:1.5}}>{"• "}<span style={{color:"#9abcd8",fontWeight:"bold"}}>{"3 technologies communes"}</span>{" accessibles dès le labo construit"}</div>
+          <div style={{fontSize:9,color:"#7a9ac0",lineHeight:1.5,marginTop:3}}>{"• "}<span style={{color:"#9abcd8",fontWeight:"bold"}}>{"9 technologies de branche"}</span>{" (3 par spécialité : Éco / Mil / Exp)"}</div>
+          <div style={{fontSize:9,color:"#7a9ac0",lineHeight:1.5,marginTop:3}}>{"• Tu choisiras "}<span style={{color:"#d4a850",fontWeight:"bold"}}>{"UNE spécialité"}</span>{" via la mission « Choisis ta voie »"}</div>
+          <div style={{fontSize:9,color:"#7a9ac0",lineHeight:1.5,marginTop:3}}>{"• Monte ton labo pour "}<span style={{color:"#9abcd8",fontWeight:"bold"}}>{"réduire le temps"}</span>{" de toute recherche"}</div>
+        </div>
+      </div>
+    );
+  }
+  const branch=state&&state.missionFlags&&state.missionFlags.chosenBranch;
+  const branchMeta={eco:{color:"#d4a850",name:"Économique"},mil:{color:"#d46060",name:"Militaire"},exp:{color:"#60a0d4",name:"Exploration"}};
+  const bm=branch&&branchMeta[branch];
+  const commonTechs=TECHNOLOGIES.filter(t=>t.branch===null);
+  const myBranchTechs=TECHNOLOGIES.filter(t=>t.branch!==null&&isTechAvailable(t,state));
+  const otherBranchTechs=TECHNOLOGIES.filter(t=>t.branch!==null&&!isTechAvailable(t,state));
+  const renderActive=()=>{
+    if(!queue)return null;
+    const tech=TECHNOLOGIES.find(t=>t.id===queue.techId);
+    if(!tech)return null;
+    const total=queue.finishAt-queue.startAt;
+    const elapsed=Math.max(0,Math.min(total,now-queue.startAt));
+    const remain=Math.max(0,Math.ceil((queue.finishAt-now)/1000));
+    const pct=total>0?Math.round((elapsed/total)*100):100;
+    return(
+      <div style={{margin:"6px 12px 14px",padding:"10px 12px",background:"linear-gradient(135deg,rgba(60,30,140,0.4),rgba(30,15,80,0.3))",border:"1px solid rgba(120,80,220,0.4)",borderRadius:7}}>
+        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
+          <span style={{fontSize:18}}>{tech.icon}</span>
+          <div style={{flex:1,minWidth:0}}>
+            <div style={{fontSize:10,color:"#c8a0ff",letterSpacing:1.5,fontWeight:"bold"}}>{"RECHERCHE EN COURS"}</div>
+            <div style={{fontSize:11,color:"#fff",fontFamily:"monospace",letterSpacing:1}}>{tech.name+" → Niv "+queue.toLevel}</div>
+          </div>
+          <div style={{fontSize:11,color:"#c8a0ff",fontFamily:"monospace",fontWeight:"bold"}}>{fmtT(remain)}</div>
+        </div>
+        <div style={{height:5,background:"rgba(0,0,0,0.4)",borderRadius:3,overflow:"hidden"}}>
+          <div style={{width:pct+"%",height:"100%",background:"linear-gradient(90deg,#8050dd,#c080ff)",transition:"width 0.5s linear"}}/>
+        </div>
+      </div>
+    );
+  };
+  const renderTech=(tech)=>{
+    const lockReason=techLockReason(tech,state);
+    const locked=lockReason!==null;
+    const lv=getTechLevel(state,tech.id);
+    const maxed=lv>=tech.maxLevel;
+    const cost=maxed?null:techCost(tech,lv);
+    const secs=maxed?0:techTime(tech,lv,labLv);
+    const canAfford=!maxed&&canAffordTech(state,cost);
+    const isQueued=queue&&queue.techId===tech.id;
+    const blocked=locked||maxed||!!queue||!canAfford;
+    const lockedReason=lockReason==="branch"?"Réservé à la branche "+(branchMeta[tech.branch]&&branchMeta[tech.branch].name||tech.branch):lockReason==="lab"?"Nécessite un Laboratoire Niv "+tech.labRequired:"";
+    const branchColor=tech.branch&&branchMeta[tech.branch]?branchMeta[tech.branch].color:"#9abcd8";
+    return(
+      <div key={tech.id} style={{padding:"10px 12px",background:locked?"rgba(8,16,30,0.4)":"rgba(10,22,40,0.7)",border:"1px solid "+(locked?"#1a2030":isQueued?"#8050dd":"#1a3050"),borderRadius:7,marginBottom:6,opacity:locked?0.55:1}}>
+        <div style={{display:"flex",alignItems:"flex-start",gap:10}}>
+          <span style={{fontSize:22,filter:locked?"grayscale(0.8)":"none",flexShrink:0,marginTop:1}}>{tech.icon}</span>
+          <div style={{flex:1,minWidth:0}}>
+            <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+              <div style={{fontSize:11,color:locked?"#5a7aa0":"#c8e0ff",fontFamily:"monospace",fontWeight:"bold",letterSpacing:1}}>{tech.name}</div>
+              {tech.branch&&<span style={{fontSize:7,padding:"1px 5px",borderRadius:3,background:branchColor+"22",border:"1px solid "+branchColor+"66",color:branchColor,letterSpacing:1,fontWeight:"bold"}}>{(branchMeta[tech.branch]&&branchMeta[tech.branch].name.toUpperCase())||tech.branch.toUpperCase()}</span>}
+            </div>
+            <div style={{fontSize:9,color:"#7a9ac0",lineHeight:1.4,marginTop:3}}>{tech.desc}</div>
+            {locked
+              ?<div style={{fontSize:9,color:"#6a7a90",marginTop:5,fontStyle:"italic"}}>{"🔒 "+lockedReason}</div>
+              :<div style={{display:"flex",alignItems:"center",gap:8,marginTop:6,flexWrap:"wrap"}}>
+                <span style={{fontSize:9,color:"#9abcd8",fontFamily:"monospace",padding:"2px 6px",background:"rgba(0,0,0,0.3)",borderRadius:3}}>{"Niv "+lv+"/"+tech.maxLevel}</span>
+                {!maxed&&cost&&<span style={{fontSize:9,color:canAfford?"#9abcd8":"#a05050",fontFamily:"monospace"}}>{"⛏️ "+fmt(cost.metal)+" 💎 "+fmt(cost.crystal)+(cost.deut>0?" ⚗️ "+fmt(cost.deut):"")}</span>}
+                {!maxed&&<span style={{fontSize:9,color:"#7a9ac0",fontFamily:"monospace"}}>{"⏱ "+fmtT(secs)}</span>}
+              </div>
+            }
+          </div>
+        </div>
+        {!locked&&(
+          maxed
+            ?<div style={{marginTop:8,padding:"6px 10px",background:"rgba(40,80,55,0.35)",border:"1px solid #44aa66",borderRadius:5,fontSize:9,color:"#88ee99",textAlign:"center",letterSpacing:1.5,fontWeight:"bold"}}>{"✓ NIVEAU MAXIMUM"}</div>
+            :<button onClick={()=>{if(!blocked)onResearch(tech,lv);}} disabled={blocked} style={{marginTop:8,width:"100%",padding:"7px 0",border:"none",borderRadius:5,background:blocked?"rgba(20,30,50,0.6)":"linear-gradient(180deg,rgba(80,50,180,0.5),rgba(60,30,140,0.4))",color:blocked?"#3a5070":"#fff",fontSize:9,fontFamily:"monospace",letterSpacing:1.5,fontWeight:"bold",cursor:blocked?"not-allowed":"pointer"}}>{
+                queue?(isQueued?"EN COURS…":"OCCUPÉ"):(canAfford?"RECHERCHER":"RESSOURCES INSUFFISANTES")
+              }</button>
+        )}
+      </div>
+    );
+  };
+  return(
+    <div style={{padding:"6px 4px 14px"}}>
+      <div style={{padding:"4px 8px 8px",marginBottom:8,borderBottom:"1px solid #0d2035",display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,flexWrap:"wrap"}}>
+        <div style={{fontSize:9,color:"#5a7aa0",letterSpacing:1.5,fontFamily:"monospace"}}>{"🔬 LABORATOIRE NIV "+labLv+" — −"+Math.round((1-1/(1+labLv*0.5))*100)+"% temps"}</div>
+        {bm&&<div style={{fontSize:8,padding:"2px 6px",borderRadius:3,background:bm.color+"22",border:"1px solid "+bm.color+"66",color:bm.color,fontFamily:"monospace",letterSpacing:1,fontWeight:"bold"}}>{"BRANCHE "+bm.name.toUpperCase()}</div>}
+      </div>
+      {/* Educational intro — always shown, compact */}
+      <div style={{margin:"0 8px 10px",padding:"8px 10px",background:"linear-gradient(135deg,rgba(30,50,90,0.35),rgba(20,30,60,0.25))",border:"1px solid rgba(80,120,200,0.3)",borderRadius:6}}>
+        <div style={{fontSize:9,color:"#88b0dd",fontFamily:"monospace",letterSpacing:1,fontWeight:"bold",marginBottom:4}}>{"💡 COMMENT ÇA MARCHE"}</div>
+        <div style={{fontSize:9,color:"#9abcd8",lineHeight:1.5}}>{"Monte ton labo pour réduire le temps de recherche. Les 3 technologies communes sont toujours accessibles. Les 9 technologies de branche (3 par branche) ne sont disponibles qu'après avoir choisi ta spécialisation via la mission "}<span style={{color:"#d4a850",fontWeight:"bold"}}>{"« Choisis ta voie »"}</span>{"."}</div>
+      </div>
+      {renderActive()}
+      {/* Branch choice prompt — shown only when branch not yet chosen */}
+      {!branch&&(
+        <div style={{margin:"0 8px 12px",padding:"10px 12px",background:"linear-gradient(135deg,rgba(140,100,40,0.3),rgba(90,60,20,0.2))",border:"1px solid rgba(212,168,80,0.5)",borderRadius:7}}>
+          <div style={{fontSize:10,color:"#ffd080",fontFamily:"monospace",letterSpacing:1,fontWeight:"bold",marginBottom:5}}>{"⚜️ SPÉCIALISATION NON CHOISIE"}</div>
+          <div style={{fontSize:9,color:"#e8c890",lineHeight:1.5,marginBottom:6}}>{"Complète la mission "}<span style={{color:"#ffd080",fontWeight:"bold"}}>{"« Choisis ta voie »"}</span>{" (onglet Missions) pour débloquer l'une des 3 branches ci-dessous. Ce choix est "}<span style={{fontWeight:"bold",color:"#ffaa60"}}>{"définitif"}</span>{"."}</div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:5}}>
+            <div style={{padding:"5px 6px",background:"rgba(212,168,80,0.12)",border:"1px solid rgba(212,168,80,0.35)",borderRadius:4,textAlign:"center"}}>
+              <div style={{fontSize:14,marginBottom:2}}>{"💰"}</div>
+              <div style={{fontSize:8,color:"#d4a850",fontWeight:"bold",letterSpacing:1}}>{"ÉCONOMIQUE"}</div>
+              <div style={{fontSize:7,color:"#a88840",lineHeight:1.3,marginTop:2}}>{"Production et coûts de construction"}</div>
+            </div>
+            <div style={{padding:"5px 6px",background:"rgba(212,96,96,0.12)",border:"1px solid rgba(212,96,96,0.35)",borderRadius:4,textAlign:"center"}}>
+              <div style={{fontSize:14,marginBottom:2}}>{"⚔️"}</div>
+              <div style={{fontSize:8,color:"#d46060",fontWeight:"bold",letterSpacing:1}}>{"MILITAIRE"}</div>
+              <div style={{fontSize:7,color:"#a84848",lineHeight:1.3,marginTop:2}}>{"Combat et production de vaisseaux"}</div>
+            </div>
+            <div style={{padding:"5px 6px",background:"rgba(96,160,212,0.12)",border:"1px solid rgba(96,160,212,0.35)",borderRadius:4,textAlign:"center"}}>
+              <div style={{fontSize:14,marginBottom:2}}>{"🔭"}</div>
+              <div style={{fontSize:8,color:"#60a0d4",fontWeight:"bold",letterSpacing:1}}>{"EXPLORATION"}</div>
+              <div style={{fontSize:7,color:"#4880a8",lineHeight:1.3,marginTop:2}}>{"Vitesse et portée des flottes"}</div>
+            </div>
+          </div>
+        </div>
+      )}
+      <div style={{padding:"0 8px"}}>
+        <div style={{fontSize:8,color:"#4a88cc",letterSpacing:2,marginBottom:6,fontFamily:"monospace"}}>{"━━ TECHNOLOGIES COMMUNES ━━"}</div>
+        {commonTechs.map(t=>renderTech(t))}
+        {myBranchTechs.length>0&&<div>
+          <div style={{fontSize:8,color:"#4a88cc",letterSpacing:2,margin:"14px 0 6px",fontFamily:"monospace"}}>{"━━ TECHNOLOGIES "+(bm?bm.name.toUpperCase():"BRANCHE")+" ━━"}</div>
+          {myBranchTechs.map(t=>renderTech(t))}
+        </div>}
+        {/* Locked branches — now grouped by branch with labeled section */}
+        {otherBranchTechs.length>0&&(()=>{
+          const byBranch={eco:[],mil:[],exp:[]};
+          otherBranchTechs.forEach(t=>{if(byBranch[t.branch])byBranch[t.branch].push(t);});
+          return ["eco","mil","exp"].map(bk=>{
+            if(!byBranch[bk]||byBranch[bk].length===0)return null;
+            const meta=branchMeta[bk];
+            const isChosenOther=branch&&branch!==bk; // user picked a different branch
+            return(
+              <div key={bk}>
+                <div style={{fontSize:8,color:meta.color,letterSpacing:2,margin:"14px 0 4px",fontFamily:"monospace",opacity:0.75}}>{"━━ BRANCHE "+meta.name.toUpperCase()+" "+(isChosenOther?"(non choisie)":"(verrouillée)")+" ━━"}</div>
+                <div style={{fontSize:8,color:"#4a5a70",fontStyle:"italic",marginBottom:6,paddingLeft:2}}>{isChosenOther?"Tu as choisi une autre spécialisation — ces technologies resteront inaccessibles.":"Débloque en choisissant cette spécialisation via la mission « Choisis ta voie »."}</div>
+                {byBranch[bk].map(t=>renderTech(t))}
+              </div>
+            );
+          });
+        })()}
+      </div>
+    </div>
+  );
+}
+
+function BuildTab({state,planet,onBuild}){
+  const[now,setNow]=useState(Date.now());
+  useEffect(()=>{const t=setInterval(()=>setNow(Date.now()),1000);return()=>clearInterval(t);},[]);
+  const rl=state.buildings.usine_robots||0;
+  const tb=getTerrainBonuses(state.zones||[],planet);
+  const qgDef=BUILDINGS.find(b=>b.id==="qg");
+  const qgLv=state.buildings.qg||0;
+  const qgCost=bCost(qgDef,qgLv,planet);
+  const qgCanAfford=canAfford(state.resources,qgCost);
+  const qgInQueue=state.queue&&state.queue.id==="qg";
+  const qgBorderColor=qgInQueue?"#2255cc":"#1a3a70";
+  const qgBtnBg=qgCanAfford&&!state.queue?"linear-gradient(135deg,#1a4488,#0d2860)":"#0a1828";
+  const qgBtnColor=qgCanAfford&&!state.queue?"#88ccff":"#1e3050";
+  const qgBtnText=state.queue?"FILE OCCUPEE":!qgCanAfford?"RESSOURCES INSUF.":"AMELIORER LE QG";
+  const qgRemain=Math.max(0,Math.round(((state.queue&&state.queue.finishAt)||0)-now)/1000);
+  return(<div>
+      <div style={{marginBottom:10,padding:12,borderRadius:12,background:"#07101e",border:"2px solid "+qgBorderColor}}>
+        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
+          <span style={{fontSize:22}}>{"🏛️"}</span>
+          <div style={{flex:1}}>
+            <div style={{fontSize:11,color:"#c8e0ff",fontFamily:"monospace"}}>{"Quartier General"}</div>
+            <div style={{fontSize:8,color:"#2a5a8a"}}>{"Niveau "}{qgLv}{" — Cout x3"}</div>
+          </div>
+          <div style={{fontSize:18,padding:"1px 8px",borderRadius:6,background:"rgba(30,70,150,.3)",color:"#5599ee",fontFamily:"monospace"}}>{qgLv}</div>
+        </div>
+        <div style={{fontSize:8,marginBottom:6,display:"flex",gap:5,flexWrap:"wrap"}}>
+          {qgCost.metal>0&&<span style={{color:state.resources.metal>=qgCost.metal?"#7090b8":"#803030"}}>{"⛏️ "}{fmt(qgCost.metal)}</span>}
+          {qgCost.crystal>0&&<span style={{color:state.resources.crystal>=qgCost.crystal?"#40a8c8":"#803030"}}>{"💎 "}{fmt(qgCost.crystal)}</span>}
+          {qgCost.deut>0&&<span style={{color:state.resources.deut>=qgCost.deut?"#40c890":"#803030"}}>{"⚗️ "}{fmt(qgCost.deut)}</span>}
+          <span style={{color:"#2a4060",marginLeft:"auto"}}>{"⏱ "}{fmtT(bTime(qgDef,qgLv,rl,planet,state,state&&state.zones))}</span>
+        </div>
+        {qgInQueue&&<div style={{fontSize:9,color:"#4a9adf",textAlign:"center",padding:"5px 0"}}>{"Construction QG... "}{fmtT(qgRemain)}</div>}
+        {!qgInQueue&&<button onClick={()=>{AudioEngine.safeClick();onBuild(qgDef,qgLv);}} disabled={!qgCanAfford||!!state.queue} style={{width:"100%",padding:"7px 0",borderRadius:7,border:"none",cursor:qgCanAfford&&!state.queue?"pointer":"not-allowed",background:qgBtnBg,color:qgBtnColor,fontSize:9,fontFamily:"monospace",letterSpacing:1}}>{qgBtnText}</button>}
+      </div>
+      {BUILDINGS.filter(b=>b.id!=="qg"&&(state.buildings[b.id]||0)>0).length===0&&(
+        <div style={{padding:"18px 14px",margin:"4px 0",borderRadius:10,background:"rgba(10,22,40,0.5)",border:"1px dashed #1a3050",textAlign:"center",color:"#6a8ab0",fontFamily:"monospace"}}>
+          <div style={{fontSize:28,marginBottom:10,opacity:0.6}}>{"🏗️"}</div>
+          <div style={{fontSize:11,color:"#9abcd8",marginBottom:6,fontWeight:"bold",letterSpacing:1}}>{"Aucun bâtiment construit"}</div>
+          <div style={{fontSize:9,lineHeight:1.6,maxWidth:300,margin:"0 auto"}}>{"Pour construire ton premier bâtiment, retourne sur la planète 3D et tape sur un continent pour placer un bâtiment dans une zone."}</div>
+        </div>
+      )}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(160px,1fr))",gap:6}}>
+        {BUILDINGS.filter(b=>b.id!=="qg"&&(state.buildings[b.id]||0)>0).map(b=>{
+          const lv=state.buildings[b.id]||0;
+          const cost=bCost(b,lv,planet);
+          const afford=canAfford(state.resources,cost);
+          const inQ=state.queue&&state.queue.id===b.id;
+          const otherQ=state.queue&&!inQ;
+          const bon=tb[b.produces]||0;
+          const zb=(state.zones||[]).find(z=>z.building===b.id);
+          const info=b.produces==="metal"?"+"+fmt(prodH(lv+1,30,bon))+"/h":b.produces==="crystal"?"+"+fmt(prodH(lv+1,20,bon))+"/h":b.produces==="deut"?"+"+fmt(prodH(lv+1,10,bon))+"/h":b.produces==="energy"?"E+"+fmt(eProd(lv+1,planet,state)):b.produces==="speed"?"x"+(lv+2)+" vit":"Niv."+(lv+1);
+          const cardBorder=inQ?"#1a5080":zb?"#1a3a20":"#0d2035";
+          const btnBg=afford&&!otherQ?"linear-gradient(135deg,#1a4070,#0d2860)":"#0a1828";
+          const btnColor=afford&&!otherQ?"#77aadd":"#1e3050";
+          const remain=Math.max(0,Math.round(((state.queue&&state.queue.finishAt)||0)-now)/1000);
+          return(<div key={b.id} style={{background:"#070f1e",border:"1px solid "+cardBorder,borderRadius:9,padding:9}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:3}}>
+                <div style={{fontSize:10,color:"#9abcd8",fontFamily:"monospace"}}>{b.icon}{" "}{b.name}</div>
+                <div style={{fontSize:12,padding:"1px 6px",borderRadius:4,background:"#0a1828",color:"#4a7aaa",fontFamily:"monospace"}}>{lv}</div>
+              </div>
+              <div style={{fontSize:8,color:bon>0?"#40c870":"#3a6a4a",marginBottom:3}}>{info}{bon>0?" ✓":""}</div>
+              {zb&&<div style={{fontSize:7,color:"#3a7a54",marginBottom:3}}>{zb.terrain&&zb.terrain.icon}{" "}{zb.name}</div>}
+              <div style={{fontSize:8,marginBottom:5,display:"flex",gap:4,flexWrap:"wrap"}}>
+                {cost.metal>0&&<span style={{color:state.resources.metal>=cost.metal?"#7090b8":"#803030"}}>{"⛏️"}{fmt(cost.metal)}</span>}
+                {cost.crystal>0&&<span style={{color:state.resources.crystal>=cost.crystal?"#40a8c8":"#803030"}}>{"💎"}{fmt(cost.crystal)}</span>}
+                {cost.deut>0&&<span style={{color:state.resources.deut>=cost.deut?"#40c890":"#803030"}}>{"⚗️"}{fmt(cost.deut)}</span>}
+                <span style={{color:"#2a4060",marginLeft:"auto"}}>{"⏱"}{fmtT(bTime(b,lv,rl,planet,state,state&&state.zones))}</span>
+              </div>
+              {inQ&&<div style={{fontSize:8,color:"#4a9adf",textAlign:"center",padding:"4px 0"}}>{"🔧 "}{fmtT(remain)}</div>}
+              {!inQ&&<button onClick={()=>{AudioEngine.safeClick();onBuild(b,lv);}} disabled={!afford||otherQ} style={{width:"100%",padding:"5px 0",borderRadius:5,border:"none",cursor:afford&&!otherQ?"pointer":"not-allowed",background:btnBg,color:btnColor,fontSize:8,fontFamily:"monospace"}}>{otherQ?"OCCUPEE":"AMELIORER"}</button>}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+function ShipsTab({state,planet,onBuildShip}){
+  const[now,setNow]=useState(Date.now()),[qty,setQty]=useState({});
+  useEffect(()=>{const t=setInterval(()=>setNow(Date.now()),1000);return()=>clearInterval(t);},[]);
+  const hl=state.buildings.hangar||0;
+  return(<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(160px,1fr))",gap:6}}>
+      {SHIPS.map(s=>{
+        // Check building requirements (hangar, qg, etc.)
+        const bldOk=Object.entries(s.req).every(([k,v])=>(state.buildings[k]||0)>=v);
+        // Check tech requirement (if any)
+        const techOk=!s.techReq||getTechLevel(state,s.techReq)>=1;
+        const ul=bldOk&&techOk;
+        // Build a readable req string for locked ships
+        let reqStr="";
+        if(!techOk)reqStr="🔬 "+(TECHNOLOGIES.find(t=>t.id===s.techReq)||{}).name;
+        else if(!bldOk){
+          const missing=Object.entries(s.req).filter(([k,v])=>(state.buildings[k]||0)<v);
+          if(missing.length===1&&missing[0][0]==="hangar")reqStr="H"+missing[0][1];
+          else reqStr=missing.map(([k,v])=>(k==="qg"?"QG":k==="hangar"?"H":k.slice(0,3).toUpperCase())+v).join(" ");
+        }
+        const q=qty[s.id]||1;
+        const _sc=sCost(s,state,planet);const tc={metal:_sc.metal*q,crystal:_sc.crystal*q,deut:_sc.deut*q};
+        const can=ul&&canAfford(state.resources,tc)&&!state.queue;
+        const inQ=state.queue&&state.queue.id===s.id;
+        return(<div key={s.id} style={{background:"#070f1e",border:"1px solid "+(inQ?"#1a5080":ul?"#0d2035":"#070e1a"),borderRadius:9,padding:9,opacity:ul?1:0.5}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
+              <div style={{fontSize:10,color:"#9abcd8",fontFamily:"monospace"}}>{s.icon}{" "}{s.name}</div>
+              {!ul?<span style={{fontSize:7,color:"#804040",padding:"1px 4px",border:"1px solid #401010",borderRadius:3,maxWidth:90,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}} title={reqStr}>{reqStr}</span>:<span style={{fontSize:9,color:"#2a4060"}}>{"x"}{state.ships[s.id]||0}</span>}
+            </div>
+            <div style={{fontSize:8,color:"#2a4a6a",marginBottom:4}}>{"⚔️"}{s.attack}{" 🛡"}{s.shield}{" 📦"}{fmt(s.cargo)}{s.isColonyShip?" 🌱":""}</div>
+            {ul&&(
+              <div>
+                <div style={{display:"flex",alignItems:"center",gap:4,marginBottom:5}}>
+                  <button onClick={()=>setQty(c=>({...c,[s.id]:Math.max(1,(c[s.id]||1)-1)}))} style={{width:22,height:22,borderRadius:4,border:"1px solid #0d2035",background:"#0a1828",color:"#4a7aaa",cursor:"pointer",fontSize:13}}>-</button>
+                  <span style={{flex:1,textAlign:"center",fontSize:12,color:"#9abcd8",fontFamily:"monospace"}}>{q}</span>
+                  <button onClick={()=>setQty(c=>({...c,[s.id]:(c[s.id]||1)+1}))} style={{width:22,height:22,borderRadius:4,border:"1px solid #0d2035",background:"#0a1828",color:"#4a7aaa",cursor:"pointer",fontSize:13}}>+</button>
+                </div>
+                <div style={{fontSize:8,marginBottom:5,display:"flex",gap:4,flexWrap:"wrap"}}>
+                  {tc.metal>0&&<span style={{color:state.resources.metal>=tc.metal?"#7090b8":"#803030"}}>{"⛏️"}{fmt(tc.metal)}</span>}
+                  {tc.crystal>0&&<span style={{color:state.resources.crystal>=tc.crystal?"#40a8c8":"#803030"}}>{"💎"}{fmt(tc.crystal)}</span>}
+                  {tc.deut>0&&<span style={{color:state.resources.deut>=tc.deut?"#40c890":"#803030"}}>{"⚗️"}{fmt(tc.deut)}</span>}
+                </div>
+                {inQ&&<div style={{fontSize:8,color:"#4a9adf",textAlign:"center",padding:"4px 0"}}>{"🏗️ "}{fmtT(Math.max(0,Math.round(((state.queue&&state.queue.finishAt)||0)-Date.now())/1000))}</div>}
+                {!inQ&&<button onClick={()=>{AudioEngine.safeClick();onBuildShip(s,q);}} disabled={!can} style={{width:"100%",padding:"5px 0",borderRadius:5,border:"none",cursor:can?"pointer":"not-allowed",background:can?"linear-gradient(135deg,#1a4070,#0d2860)":"#0a1828",color:can?"#77aadd":"#1e3050",fontSize:8,fontFamily:"monospace"}}>CONSTRUIRE</button>}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+function FleetTab({state,planet,planets,myIdx,onSend}){
+  const[now,setNow]=useState(Date.now()),[sel,setSel]=useState({}),[target,setTarget]=useState(null);
+  useEffect(()=>{const t=setInterval(()=>setNow(Date.now()),1000);return()=>clearInterval(t);},[]);
+  const avail=SHIPS.filter(s=>(state.ships[s.id]||0)>0);
+  const total=Object.values(sel).reduce((a,b)=>a+b,0);
+  const send=()=>{
+    if(!target||total===0)return;
+    // Exploration branch: fleets travel 25% faster → duration divided by speed mult
+    const speedMult=fleetSpeedMult(state,planet);
+    const duration=Math.round(180000/speedMult);
+    onSend({id:Date.now().toString(36),ships:{...sel},target,departAt:now,arriveAt:now+duration,returning:false,cm:0,cc:0},sel);
+    setSel({});setTarget(null);
+  };
+  return(<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+      <div style={{background:"#070f1e",border:"1px solid #0d2035",borderRadius:9,padding:10}}>
+        <div style={{fontSize:8,color:"#1e3050",letterSpacing:2,marginBottom:8}}>ENVOYER UNE FLOTTE</div>
+        {avail.length===0?<div style={{fontSize:9,color:"#1e3050",textAlign:"center",padding:12}}>Construisez des vaisseaux.</div>:(
+          <div>
+            {avail.map(s=>(
+              <div key={s.id} style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
+                <span style={{fontSize:13}}>{s.icon}</span>
+                <span style={{flex:1,fontSize:9,color:"#6a9ab8",fontFamily:"monospace"}}>{s.name}{" ("}{state.ships[s.id]}{")"}</span>
+                <div style={{display:"flex",alignItems:"center",gap:3}}>
+                  <button onClick={()=>setSel(c=>({...c,[s.id]:Math.max(0,(c[s.id]||0)-1)}))} style={{width:18,height:18,borderRadius:3,border:"1px solid #0d2035",background:"#0a1828",color:"#4a7aaa",cursor:"pointer",fontSize:11}}>-</button>
+                  <span style={{width:20,textAlign:"center",fontSize:10,color:"#9abcd8",fontFamily:"monospace"}}>{sel[s.id]||0}</span>
+                  <button onClick={()=>setSel(c=>({...c,[s.id]:Math.min(state.ships[s.id],(c[s.id]||0)+1)}))} style={{width:18,height:18,borderRadius:3,border:"1px solid #0d2035",background:"#0a1828",color:"#4a7aaa",cursor:"pointer",fontSize:11}}>+</button>
+                </div>
+              </div>
+            ))}
+            <div style={{fontSize:8,color:"#1e3050",marginTop:6,marginBottom:4}}>DESTINATION</div>
+            <div style={{display:"flex",flexWrap:"wrap",gap:3,marginBottom:8,maxHeight:70,overflowY:"auto"}}>
+              {planets.map((p,i)=>i!==myIdx&&(
+                <button key={i} onClick={()=>setTarget(i)} style={{padding:"2px 6px",borderRadius:4,border:"1px solid "+(target===i?"#2255aa":"#0d2035"),background:target===i?"#0d2040":"transparent",color:target===i?"#88ccff":"#2a4a6a",fontSize:7,cursor:"pointer",fontFamily:"monospace"}}>{p.name.split(" ")[0]}</button>
+              ))}
+            </div>
+            <button onClick={()=>{AudioEngine.safeShipLaunch();send();}} disabled={!target||total===0} style={{width:"100%",padding:"5px 0",borderRadius:6,border:"none",cursor:target&&total>0?"pointer":"not-allowed",background:target&&total>0?"linear-gradient(135deg,#1a4070,#0d2860)":"#0a1828",color:target&&total>0?"#77aadd":"#1e3050",fontSize:8,fontFamily:"monospace"}}>{"🚀 ENVOYER ("}{total}{")"}</button>
+          </div>
+        )}
+      </div>
+      <div style={{background:"#070f1e",border:"1px solid #0d2035",borderRadius:9,padding:10}}>
+        <div style={{fontSize:8,color:"#1e3050",letterSpacing:2,marginBottom:8}}>FLOTTES ACTIVES</div>
+        {(state.fleets||[]).length===0?<div style={{fontSize:9,color:"#1e3050",textAlign:"center",padding:12}}>Aucune flotte.</div>:(state.fleets||[]).map(f=>{
+          const prog=Math.min(1,(now-f.departAt)/(f.arriveAt-f.departAt));
+          const rem=Math.max(0,Math.round((f.arriveAt-now)/1000));
+          return(<div key={f.id} style={{marginBottom:8,padding:"6px 8px",borderRadius:7,background:"rgba(10,20,40,.5)",border:"1px solid #0d2035"}}>
+              <div style={{display:"flex",justifyContent:"space-between",fontSize:9,marginBottom:3}}>
+                <span style={{color:"#6a9ab8"}}>{f.returning?"\u21A9 Retour":(f.kind==="anomaly"?"\u2192 \u{1F30C} Anomalie":"\u2192 "+(planets[f.target]&&planets[f.target].name||"??"))}</span>
+                <span style={{color:"#4a7aaa",fontSize:8}}>{fmtT(rem)}</span>
+              </div>
+              <div style={{height:2,background:"#0a1828",borderRadius:1}}>
+                <div style={{height:"100%",width:(prog*100)+"%",background:f.returning?"#3a7a54":"#2255aa",borderRadius:1,transition:"width 1s linear"}}/>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+function PlanetPanel({planet,userId,planets,myIdx,onClose,onStateChange,onViewPlanet}){
+  const[state,setState]=useState(()=>{
+    const s=loadGS(userId);
+    return s?tickGS(s,planet):initState(planet);
+  });
+  const[tab,setTab]=useState("buildings");
+  const[c1]=gc(planet.type);
+  const[renaming,setRenaming]=useState(false);
+  const[nameInput,setNameInput]=useState("");
+  useEffect(()=>{
+    const t=setInterval(()=>{
+      setState(p=>{
+        const fresh=loadGS(userId)||p;
+        const merged=(fresh.queue&&(!p.queue||fresh.queue.startAt!==p.queue.startAt))?fresh:p;
+        const n=tickGS(merged,planet);
+        saveGS(userId,n);
+        onStateChange&&onStateChange(n);
+        return n;
+      });
+    },1000);
+    return()=>clearInterval(t);
+  },[userId]);
+  const doBuild=(b,lv)=>{
+    // Check affordability before setState to decide on SFX
+    setState(prev=>{
+      if(prev.queue)return prev;
+      const cost=bCost(b,lv,planet);
+      if(!canAfford(prev.resources,cost))return prev;
+      const secs=bTime(b,lv,prev.buildings.usine_robots||0,planet,prev,prev.zones);
+      const ns={...prev,resources:deduct(prev.resources,cost),queue:{type:"build",id:b.id,startAt:Date.now(),finishAt:Date.now()+secs*1000}};
+      saveGS(userId,ns);onStateChange&&onStateChange(ns);
+      return ns;
+    });
+    // Play SFX after state update (outside pure updater)
+    setTimeout(()=>{
+      if(AudioEngine&&AudioEngine.safeBuildStart)AudioEngine.safeBuildStart();
+    },50);
+  };
+  const doShip=(s,q)=>{
+    setState(prev=>{
+      if(prev.queue)return prev;
+      const _sc=sCost(s,state,planet);const tc={metal:_sc.metal*q,crystal:_sc.crystal*q,deut:_sc.deut*q};
+      if(!canAfford(prev.resources,tc))return prev;
+      const secs=Math.max(60,Math.round((tc.metal+tc.crystal)/(200*(1+(prev.buildings.hangar||0)))*sTimeMult(prev)));
+      const ns={...prev,resources:deduct(prev.resources,tc),queue:{type:"ship",id:s.id,count:q,startAt:Date.now(),finishAt:Date.now()+secs*1000}};
+      saveGS(userId,ns);onStateChange&&onStateChange(ns);
+      return ns;
+    });
+    setTimeout(()=>{
+      if(AudioEngine&&AudioEngine.safeBuildStart)AudioEngine.safeBuildStart();
+    },50);
+  };
+  const doFleet=(f,sel)=>{
+    setState(prev=>{
+      const ns2={...prev.ships};
+      Object.entries(sel).forEach(([k,v])=>{ns2[k]=Math.max(0,(ns2[k]||0)-v);});
+      const ns={
+        ...prev,
+        ships:ns2,
+        fleets:[...(prev.fleets||[]),f],
+        missionFlags:{...(prev.missionFlags||{}),dispatchedFleet:true}
+      };
+      saveGS(userId,ns);onStateChange&&onStateChange(ns);
+      return ns;
+    });
+  };
+
+  const doResearch=(tech,lv)=>{
+    setState(prev=>{
+      if(prev.researchQueue)return prev;
+      const labLv=(prev.buildings&&prev.buildings.laboratoire)||0;
+      if(labLv<1)return prev;
+      const cost=techCost(tech,lv);
+      if(!canAffordTech(prev,cost))return prev;
+      const secs=techTime(tech,lv,labLv);
+      const ns={...prev,
+        resources:{metal:prev.resources.metal-cost.metal,crystal:prev.resources.crystal-cost.crystal,deut:prev.resources.deut-(cost.deut||0)},
+        researchQueue:{techId:tech.id,fromLevel:lv,toLevel:lv+1,startAt:Date.now(),finishAt:Date.now()+secs*1000}
+      };
+      saveGS(userId,ns);onStateChange&&onStateChange(ns);
+      if(AudioEngine.safeClick)AudioEngine.safeClick();
+      return ns;
+    });
+  };
+
+  const doFinalize=()=>{
+    setState(prev=>{
+      if(!prev.queue||!prev.queue.ready)return prev;
+      const q=prev.queue;
+      let ns={...prev,buildings:{...prev.buildings},ships:{...prev.ships},continents:(prev.continents||[]).map(c=>({...c,zones:[...c.zones]})),queue:null};
+      if(q.type==="build"){
+        ns.buildings[q.id]=(ns.buildings[q.id]||0)+1;
+        const allZones=ns.continents.flatMap(c=>c.zones);
+        const alreadyPlaced=allZones.some(z=>z.building===q.id);
+        if(!alreadyPlaced){
+          const bDef=BUILDINGS.find(b=>b.id===q.id);
+          const findFn=(predicate)=>{
+            for(let i=0;i<ns.continents.length;i++){
+              const idx=ns.continents[i].zones.findIndex(predicate);
+              if(idx>=0)return{ci:i,zi:idx};
+            }
+            return null;
+          };
+          const bonusLoc=bDef&&bDef.terrainBonus?findFn(z=>!z.building&&bDef.terrainBonus.includes(z.type)):null;
+          const anyLoc=findFn(z=>!z.building);
+          const loc=bonusLoc||anyLoc;
+          if(loc){ns.continents[loc.ci].zones[loc.zi]={...ns.continents[loc.ci].zones[loc.zi],building:q.id};}
+        }
+        ns.zones=ns.continents.flatMap(c=>c.zones);
+      }
+      if(q.type==="ship")ns.ships[q.id]=(ns.ships[q.id]||0)+(q.count||1);
+      saveGS(userId,ns);onStateChange&&onStateChange(ns);
+      return ns;
+    });
+    AudioEngine.init();
+    if(AudioEngine.resume)AudioEngine.resume();
+    setTimeout(()=>{try{AudioEngine.playBuildComplete&&AudioEngine.playBuildComplete();}catch(e){}},100);
+  };
+  const TABS=[["buildings","🏗️","Bâtiments"],["ships","🛸","Vaisseaux"],["research","🔬","Recherche"],["fleet","🚀","Flottes"]];
+  return(<div style={{position:"fixed",top:0,left:0,right:0,bottom:0,zIndex:100,display:"flex",flexDirection:"column",background:"linear-gradient(160deg,#06101e,#08141f)"}}>
+      
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"4px 10px",borderBottom:"1px solid #0d2035",flexShrink:0,height:38,background:"rgba(6,14,28,.98)"}}>
+        <div style={{display:"flex",alignItems:"center",gap:8}}>
+          <div style={{width:24,height:24,borderRadius:"50%",background:"radial-gradient(circle at 35% 35%,"+gc(planet.type)[1]+","+gc(planet.type)[0]+")"}}/>
+          <div style={{flex:1}}>
+            <div style={{display:"flex",alignItems:"center",gap:5}}>
+              {renaming
+                ?<input autoFocus value={nameInput} onChange={e=>setNameInput(e.target.value)}
+                    onKeyDown={e=>{if(e.key==="Enter"){const n=nameInput.trim();if(n){setState(p=>{const ns={...p,planetName:n};saveGS(userId,ns);return ns;});}setRenaming(false);} if(e.key==="Escape")setRenaming(false);}}
+                    style={{flex:1,background:"#0a1828",border:"1px solid #2255aa",borderRadius:5,color:"#c8e0ff",fontSize:16,padding:"2px 6px",fontFamily:"monospace",outline:"none"}}/>
+                :<div style={{fontFamily:"monospace",fontSize:12,color:"#c8e0ff",letterSpacing:1}}>{state.planetName||planet.name}</div>
+              }
+              <button onClick={()=>{
+                if(renaming){
+                  const n=nameInput.trim();
+                  if(n){setState(p=>{const ns={...p,planetName:n};saveGS(userId,ns);onStateChange&&onStateChange(ns);return ns;});}
+                  setRenaming(false);
+                } else {
+                  setNameInput(state.planetName||planet.name);
+                  setRenaming(true);
+                }
+              }} style={{padding:"1px 6px",background:renaming?"rgba(30,100,50,.4)":"transparent",border:"1px solid "+(renaming?"#2a7040":"#1a3050"),borderRadius:4,color:renaming?"#44cc88":"#4a7aaa",fontSize:8,cursor:"pointer",fontFamily:"monospace"}}>{renaming?"✓":"✏️"}</button>
+            </div>
+            <div style={{fontSize:8,color:"#2a4a6a"}}>
+              {planet.type}{" · ⭐"}
+              {PLANET_PASSIVE_BONUS[planet.type]&&<span style={{color:"#3a6a8a",marginLeft:4}}>{planet.type}{" — "}{PLANET_PASSIVE_BONUS[planet.type].label}</span>}
+            </div>
+          </div>
+        </div>
+        <div style={{display:"flex",gap:5}}>
+          <button onClick={()=>{AudioEngine.safeClick&&AudioEngine.safeClick();onViewPlanet();}} style={{padding:"4px 8px",background:"rgba(20,50,100,.3)",border:"1px solid #1a3a70",borderRadius:6,color:"#5588cc",fontSize:9,cursor:"pointer",fontFamily:"monospace"}}>{"🌍 Planète"}</button>
+          <button onClick={onClose} style={{padding:"4px 10px",background:"transparent",border:"1px solid #0d2035",borderRadius:6,color:"#2a4a6a",fontSize:9,cursor:"pointer",fontFamily:"monospace"}}>{"✕"}</button>
+        </div>
+      </div>
+      <ResBar res={state.resources} bld={state.buildings} zones={state.zones} planet={planet} state={state}/>
+      {state.queue&&(()=>{
+        const q=state.queue;
+        const ready=q.ready;
+        const remain=Math.max(0,Math.round((q.finishAt-Date.now())/1000));
+        const bld=BUILDINGS.find(b=>b.id===q.id);
+        const label=bld?bld.name:q.id;
+        const icon=bld?bld.icon:"🏗️";
+        return(<div style={{padding:"6px 10px",background:ready?"rgba(20,100,40,.25)":"rgba(10,30,80,.3)",borderBottom:"1px solid "+(ready?"#1a6030":"#0d2540"),display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
+            <span style={{fontSize:16}}>{icon}</span>
+            <div style={{flex:1,fontSize:9,color:ready?"#50d080":"#6a9adf",fontFamily:"monospace"}}>
+              {ready?"✅ "+label+" — Prêt !":"🔧 "+label+" — "+fmtT(remain)}
+              {!ready&&<div style={{marginTop:3,height:3,background:"#0a1828",borderRadius:2}}><div style={{height:"100%",borderRadius:2,background:"#2266cc",width:Math.round((1-(q.finishAt-Date.now())/((q.finishAt||1)-(q.startAt||0)))*100)+"%",transition:"width 1s linear"}}/></div>}
+            </div>
+            {ready&&<button onClick={doFinalize} style={{padding:"4px 12px",background:"linear-gradient(135deg,#1a6030,#0d4020)",border:"1px solid #2a8040",borderRadius:6,color:"#60e090",fontSize:9,cursor:"pointer",fontFamily:"monospace",fontWeight:"bold",letterSpacing:1}}>{"⚡ FINALISER"}</button>}
+          </div>
+        );
+      })()}
+      
+      <div style={{display:"flex",borderBottom:"1px solid #0a1828",flexShrink:0}}>
+        {TABS.map(([k,icon,label])=>(
+          <button key={k} onClick={()=>{AudioEngine.safeSoftClick&&AudioEngine.safeSoftClick();setTab(k);}} style={{flex:1,padding:"6px 0",fontSize:8,border:"none",cursor:"pointer",background:"transparent",color:tab===k?"#77aadd":"#2a4a6a",fontFamily:"monospace",borderBottom:tab===k?"2px solid #2255aa":"2px solid transparent",display:"flex",flexDirection:"column",alignItems:"center",gap:1}}>
+            <span style={{fontSize:13}}>{icon}</span>
+            <span>{label}</span>
+          </button>
+        ))}
+      </div>
+      
+      <div style={{flex:1,overflow:"auto",WebkitOverflowScrolling:"touch",padding:8}}>
+        {tab==="buildings"&&<BuildTab state={state} planet={planet} onBuild={doBuild}/>}
+        {tab==="ships"&&<ShipsTab state={state} planet={planet} onBuildShip={doShip}/>}
+        {tab==="research"&&<ResearchTab state={state} planet={planet} onResearch={doResearch}/>}
+        {tab==="fleet"&&<FleetTab state={state} planet={planet} planets={planets} myIdx={myIdx} onSend={doFleet}/>}
+      </div>
+    </div>
+  );
+}
+
+function AScreen({onAuth}){
+  const[mode,setMode]=useState("login");
+  const[email,setEmail]=useState(""),  [pw,setPw]=useState("");
+  const[name,setName]=useState("");
+  const[err,setErr]=useState(""), [ok,setOk]=useState("");
+  const[load,setLoad]=useState(false);
+  const go=async()=>{
+    setErr("");setOk("");setLoad(true);
+    try{
+      if(mode==="register"){
+        if(!name.trim()){setErr("Nom requis.");setLoad(false);return;}
+        if(pw.length<6){setErr("6 caractères minimum.");setLoad(false);return;}
+        const r=await Auth.reg(email,pw,name.trim());
+        if(!r.ok){setErr(r.err);setLoad(false);return;}
+        setOk("Compte créé !");setMode("login");setPw("");setName("");
+      }else{
+        const r=await Auth.login(email,pw);
+        if(!r.ok){setErr(r.err);setLoad(false);return;}
+        Auth.saveSession(r.user);onAuth(r.user);
+      }
+    }catch(e){setErr("Erreur: "+e.message);}
+    setLoad(false);
+  };
+  const reset=()=>{
+    if(!window.confirm("Effacer toutes les données ?"))return;
+    Object.keys(localStorage).filter(k=>k.startsWith("gx_")).forEach(k=>localStorage.removeItem(k));
+    setOk("Données effacées.");
+  };
+  const INP={width:"100%",padding:"9px 12px",background:"#060f1c",border:"1px solid #0d2035",borderRadius:8,color:"#9abcd8",fontSize:16,fontFamily:"monospace",outline:"none"};
+  const LBL={fontSize:9,color:"#1e3050",marginBottom:3,letterSpacing:1,display:"block"};
+  return(<div style={{width:"100vw",height:"100svh",minHeight:"100dvh",background:"#000005",display:"flex",alignItems:"center",justifyContent:"center",overflow:"hidden",position:"relative",paddingBottom:"env(safe-area-inset-bottom,0px)",paddingTop:"env(safe-area-inset-top,0px)"}}>
+      <div style={{position:"absolute",top:0,left:0,right:0,bottom:0,pointerEvents:"none"}}>
+        {Array.from({length:60},(_,i)=>(
+          <div key={i} style={{position:"absolute",left:((i*137.5)%100)+"%",top:((i*79.3)%100)+"%",width:1,height:1,borderRadius:"50%",background:"rgba(180,210,255,.6)",animation:"twinkle "+(2+i%3)+"s ease-in-out "+((i*.07).toFixed(2))+"s infinite"}}/>
+        ))}
+      </div>
+      <div style={{display:"flex",width:"100%",maxWidth:700,maxHeight:"90dvh",margin:"0 16px",background:"linear-gradient(160deg,#060f1c,#08141f)",border:"1px solid #0d2035",borderRadius:16,overflow:"hidden",boxShadow:"0 0 60px rgba(0,20,60,.8)",position:"relative",zIndex:1}}>
+        <div style={{flex:"0 0 38%",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",background:"linear-gradient(160deg,#040c18,#060f20)",borderRight:"1px solid #0d2035",padding:"20px 16px",gap:12}}>
+          <div style={{fontFamily:"monospace",fontSize:28,letterSpacing:4,fontWeight:"bold",background:"linear-gradient(90deg,#3388ff,#77ccff,#ffd700)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent"}}>GALAXIA</div>
+          <div style={{fontSize:8,color:"#1e3050",letterSpacing:3,textAlign:"center"}}>SYSTÈME DE{"  "}COMMANDEMENT</div>
+          <div style={{fontSize:9,color:"#0d1e30",textAlign:"center",lineHeight:1.6}}>{"Conquiers l'univers, commandant."}</div>
+        </div>
+        <div style={{flex:1,padding:"16px 18px",overflow:"auto",WebkitOverflowScrolling:"touch"}}>
+          <div style={{display:"flex",marginBottom:14,background:"#040c18",borderRadius:8,padding:3}}>
+            {[["login","Connexion"],["register","Inscription"]].map(([m,l])=>(
+              <button key={m} onClick={()=>{setMode(m);setErr("");setOk("");}} style={{flex:1,padding:"6px 0",fontSize:10,border:"none",cursor:"pointer",borderRadius:6,background:mode===m?"#0d2035":"transparent",color:mode===m?"#6aacdf":"#1e3050",fontFamily:"monospace"}}>{l}</button>
+            ))}
+          </div>
+          {mode==="register"&&(
+            <div style={{marginBottom:10}}>
+              <span style={LBL}>NOM DE COMMANDANT</span>
+              <input style={INP} placeholder="ex: DarkNova" value={name} onChange={e=>setName(e.target.value)}/>
+            </div>
+          )}
+          <div style={{marginBottom:10}}>
+            <span style={LBL}>EMAIL</span>
+            <input style={INP} type="email" placeholder="commandant@galaxia.io" value={email} onChange={e=>setEmail(e.target.value)}/>
+          </div>
+          <div style={{marginBottom:14}}>
+            <span style={LBL}>MOT DE PASSE</span>
+            <input style={INP} type="password" placeholder="••••••••" value={pw} onChange={e=>setPw(e.target.value)} onKeyDown={e=>e.key==="Enter"&&go()}/>
+          </div>
+          {err&&<div style={{marginBottom:8,padding:"7px 10px",borderRadius:7,background:"rgba(180,30,30,.15)",border:"1px solid #4a1515",color:"#e08080",fontSize:10}}>{err}</div>}
+          {ok&&<div style={{marginBottom:8,padding:"7px 10px",borderRadius:7,background:"rgba(30,120,60,.15)",border:"1px solid #104020",color:"#60c880",fontSize:10}}>{ok}</div>}
+          <button onClick={()=>{AudioEngine.safeClick();go();}} disabled={load} style={{width:"100%",padding:"10px 0",borderRadius:8,border:"none",cursor:"pointer",background:load?"#0a1828":"linear-gradient(135deg,#1a4070,#0d2860)",color:load?"#1e3050":"#77aadd",fontSize:11,letterSpacing:2,fontFamily:"monospace",marginBottom:8}}>
+            {load?"⟳ EN COURS...":mode==="login"?"SE CONNECTER":"REJOINDRE LA GALAXIE"}
+          </button>
+          <button onClick={reset} style={{width:"100%",padding:"5px 0",borderRadius:7,border:"1px solid #1a0a0a",background:"transparent",color:"#3a1515",fontSize:8,cursor:"pointer",fontFamily:"monospace"}}>{"⚠ Réinitialiser les données"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+function ResourceInfoModal({type,state,planet,onClose}){
+  if(!type||!state)return null;
+  const tb=getTerrainBonuses(state.zones||[],planet);
+  const bld=state.buildings||{};
+  const ratio=eRatio(bld,planet,state,state.zones);
+
+  const INFO={
+    metal:{
+      icon:"⛏️", name:"Métal", color:"#7090b8",
+      desc:"Ressource de base indispensable. Utilisée pour construire tous les bâtiments et vaisseaux.",
+      uses:["Construction de bâtiments","Fabrication de vaisseaux","Amélioration des infrastructures"],
+      prodBld:"mine_metal", prodBase:30, bonusKey:"metal",
+      tip:"Construisez des mines sur des volcans (+80%) ou des montagnes (+50%) pour maximiser la production.",
+    },
+    crystal:{
+      icon:"💎", name:"Cristal", color:"#40a8c8",
+      desc:"Minéral précieux utilisé dans les technologies avancées et les systèmes électroniques.",
+      uses:["Technologies de pointe","Systèmes de navigation","Armement de précision"],
+      prodBld:"mine_crystal", prodBase:20, bonusKey:"crystal",
+      tip:"Les forêts (+50%) et les montagnes (+50%) sont idéales pour les mines de cristal.",
+    },
+    deut:{
+      icon:"⚗️", name:"Deutérium", color:"#40c890",
+      desc:"Carburant spatial essentiel pour les flottes et la production d'énergie avancée.",
+      uses:["Carburant des flottes","Production d'énergie","Systèmes de propulsion"],
+      prodBld:"synth_deut", prodBase:10, bonusKey:"deut",
+      tip:"Les côtes (+50%) et les plaines sont les meilleures zones pour le synthétiseur.",
+    },
+    energy:{
+      icon:"⚡", name:"Énergie", color:"#ffcc40",
+      desc:"Alimente vos mines et bâtiments. Un déficit ralentit toute votre production.",
+      uses:["Active les mines au maximum","Alimente les bâtiments avancés","Soutient l'efficacité de l'empire"],
+      prodBld:"centrale", prodBase:20, bonusKey:"energy",
+      tip:"Les volcans (+30%), déserts (+35%) et toundras (+20%) boostent la Centrale Solaire.",
+      isEnergy:true,
+    },
+  };
+  const info=INFO[type];
+  if(!info)return null;
+
+  const lv=bld[info.prodBld]||0;
+  const bon=tb[info.bonusKey]||0;
+  const prodPerH=info.isEnergy?eProd(lv,planet,state,state.zones):prodH(lv,info.prodBase,bon,state,info.bonusKey)*ratio;
+  const energyNeed=info.isEnergy?eNeed(bld):0;
+  const passive=state.planetType&&PLANET_PASSIVE_BONUS&&PLANET_PASSIVE_BONUS[state.planetType];
+  const passiveBonus=passive&&passive[info.bonusKey]||0;
+
+  const _rs3={position:"fixed",top:0,left:0,right:0,bottom:0,zIndex:600,display:"flex",alignItems:"flex-start",justifyContent:"flex-end",padding:"44px 12px 0",background:"rgba(0,0,0,.4)"};
+  return(<div onClick={onClose} style={_rs3}>
+      <div onClick={e=>e.stopPropagation()} style={{width:"min(260px,88vw)",maxHeight:"80vh",overflowY:"auto",WebkitOverflowScrolling:"touch",background:"linear-gradient(160deg,#07101f,#0a1628)",border:"1px solid #1a3050",borderRadius:14,padding:16,fontFamily:"monospace",color:"#9abcd8",boxShadow:"0 0 30px rgba(0,20,80,.9)"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+          <div style={{display:"flex",alignItems:"center",gap:8}}>
+            <span style={{fontSize:24}}>{info.icon}</span>
+            <div>
+              <div style={{fontSize:13,color:info.color,fontWeight:"bold"}}>{info.name}</div>
+              <div style={{fontSize:9,color:"#2a4a6a"}}>{info.isEnergy?("Ratio : "+Math.round(ratio*100)+"%"):("Stock : "+fmt(state.resources[type]||0))}</div>
+            </div>
+          </div>
+          <button onClick={onClose} style={{background:"transparent",border:"none",color:"#2a4060",cursor:"pointer",fontSize:16}}>{"✕"}</button>
+        </div>
+        <div style={{fontSize:9,color:"#4a6a8a",lineHeight:1.6,marginBottom:10,padding:"7px 9px",borderRadius:7,background:"rgba(10,25,50,.4)",border:"1px solid #0d2035"}}>
+          {info.desc}
+        </div>
+        <div style={{marginBottom:10}}>
+          <div style={{fontSize:8,color:"#1e3050",letterSpacing:2,marginBottom:6}}>{info.isEnergy?"BILAN ÉNERGÉTIQUE":"PRODUCTION"}</div>
+          <div style={{display:"flex",justifyContent:"space-between",padding:"6px 9px",borderRadius:7,background:"rgba(10,30,60,.5)",border:"1px solid #0d2035"}}>
+            <div>
+              <div style={{fontSize:11,color:info.color,fontFamily:"monospace",fontWeight:"bold"}}>{info.isEnergy?(fmt(prodPerH)+" / "+fmt(energyNeed)):(fmt(prodPerH)+"/h")}</div>
+              <div style={{fontSize:8,color:"#2a4060"}}>{info.isEnergy?("Centrale niv. "+lv):("niveau "+lv)}</div>
+            </div>
+            {(bon>0||passiveBonus>0)&&(
+              <div style={{textAlign:"right"}}>
+                {bon>0&&<div style={{fontSize:9,color:"#40c870"}}>{"+ terrain "}{Math.round(bon*100)}{"%"}</div>}
+                {passiveBonus>0&&<div style={{fontSize:9,color:"#55aadd"}}>{"+ planète "}{Math.round(passiveBonus*100)}{"%"}</div>}
+                {!info.isEnergy&&ratio<1&&<div style={{fontSize:9,color:"#e08030"}}>{"⚡ "}{Math.round(ratio*100)}{"% efficacité"}</div>}
+              </div>
+            )}
+          </div>
+        </div>
+        <div style={{marginBottom:10}}>
+          <div style={{fontSize:8,color:"#1e3050",letterSpacing:2,marginBottom:5}}>{"UTILISATIONS"}</div>
+          {info.uses.map(u=>(
+            <div key={u} style={{fontSize:9,color:"#5a7a9a",marginBottom:3,display:"flex",alignItems:"center",gap:6}}>
+              <span style={{color:info.color}}>{"›"}</span>{u}
+            </div>
+          ))}
+        </div>
+        <div style={{fontSize:8,color:"#3a6a3a",lineHeight:1.5,padding:"6px 9px",borderRadius:7,background:"rgba(10,40,15,.4)",border:"1px solid #1a3a20"}}>
+          {"💡 "}{info.tip}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function QGPlacementModal({state,planet,onPlace}){
+  if(!state||!state.continents)return null;
+  const [selZone,setSelZone]=useState(null);
+  // Flatten all buildable zones
+  const allZones=[];
+  state.continents.forEach(cont=>{
+    (cont.zones||[]).forEach(z=>{
+      if(z.terrain&&z.terrain.buildable)allZones.push({zone:z,cont});
+    });
+  });
+  // Group by terrain type with fixed order
+  const typeOrder=["plain","forest","mountain","volcano","desert","coast","tundra","swamp"];
+  const grouped={};
+  typeOrder.forEach(t=>{grouped[t]=[];});
+  allZones.forEach(item=>{if(grouped[item.zone.type])grouped[item.zone.type].push(item);});
+  // QG bonus labels (the meaningful payoff for each terrain choice)
+  const QG_BONUS_LABELS={
+    qgStorage:{lbl:"+10% capacité de stockage globale",icon:"📦",color:"#9adda0"},
+    qgProdAll:{lbl:"+5% production de toutes les ressources",icon:"⚡",color:"#ffcc70"},
+    qgBuildCost:{lbl:"−10% coût de construction",icon:"🏗️",color:"#aaccff"},
+    qgShipCost:{lbl:"−5% coût de fabrication des vaisseaux",icon:"🚀",color:"#dca0ff"},
+    qgEnergy:{lbl:"+10% production d'énergie",icon:"☀️",color:"#ffdd55"},
+    qgFleetSpeed:{lbl:"+10% vitesse de flotte",icon:"💨",color:"#88e0ff"},
+    qgDeutStorage:{lbl:"+15% stockage de deutérium",icon:"⚗️",color:"#7adda0"},
+    qgCrystalProd:{lbl:"+5% production de cristal",icon:"💎",color:"#7adfe8"},
+  };
+  const sacLabel=k=>k==="metal"?"métal":k==="crystal"?"cristal":k==="deut"?"deut":k==="energy"?"énergie":k==="buildSpeed"?"vit. constr.":k==="shipCost"?"coût vaiss.":k;
+  const confirm=()=>{
+    if(!selZone)return;
+    AudioEngine.safeClick();
+    onPlace(selZone);
+  };
+  return(<div style={{position:"fixed",inset:0,zIndex:99999,background:"rgba(0,5,15,0.95)",display:"flex",flexDirection:"column"}}>
+    <div style={{padding:"14px 16px",borderBottom:"1px solid rgba(100,200,255,0.3)",background:"linear-gradient(180deg,rgba(20,40,80,0.8),rgba(10,20,40,0.6))"}}>
+      <div style={{fontSize:10,color:"#6aa0d0",letterSpacing:3,marginBottom:4}}>{"FONDATION DE L'EMPIRE"}</div>
+      <div style={{fontSize:16,color:"#cce6ff",fontWeight:"bold",letterSpacing:1.5,fontFamily:"'Share Tech Mono',monospace"}}>{"Où fonder ton Quartier Général ?"}</div>
+      <div style={{fontSize:10,color:"#7aa0c0",marginTop:6,lineHeight:1.4}}>{"Le terrain choisi déterminera le bonus permanent de ton QG. Choisis avec soin : ce choix est définitif."}</div>
+    </div>
+    <div style={{flex:1,overflowY:"auto",padding:"10px 12px"}}>
+      {typeOrder.map(tid=>{
+        const items=grouped[tid]||[];
+        if(items.length===0)return null;
+        const tt=TERRAIN_TYPES[tid];
+        if(!tt)return null;
+        const allKeys=Object.keys(tt.bonuses||{});
+        const qgKeys=allKeys.filter(k=>k.indexOf("qg")===0);
+        const sacKeys=allKeys.filter(k=>k.indexOf("qg")!==0);
+        return(<div key={tid} style={{marginBottom:14,padding:10,borderRadius:8,background:"rgba(8,16,30,0.5)",border:"1px solid rgba(60,100,140,0.25)"}}>
+          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8,paddingBottom:6,borderBottom:"1px solid rgba(60,100,140,0.3)"}}>
+            <span style={{fontSize:18}}>{tt.icon}</span>
+            <span style={{fontSize:12,color:"#aaccee",letterSpacing:2,fontWeight:"bold"}}>{tt.name.toUpperCase()}</span>
+            <span style={{fontSize:8,color:"#5a7a9a",marginLeft:"auto"}}>{items.length+" zone"+(items.length>1?"s":"")}</span>
+          </div>
+          {qgKeys.map(k=>{
+            const meta=QG_BONUS_LABELS[k];
+            if(!meta)return null;
+            return(<div key={k} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 8px",marginBottom:6,background:"rgba(40,80,50,0.25)",borderRadius:6,border:"1px solid rgba(80,160,90,0.3)"}}>
+              <span style={{fontSize:14}}>{meta.icon}</span>
+              <span style={{fontSize:10,color:meta.color,fontWeight:"bold",letterSpacing:0.3}}>{meta.lbl}</span>
+            </div>);
+          })}
+          {sacKeys.length>0&&(
+            <div style={{fontSize:8,color:"#5a7a9a",fontStyle:"italic",marginBottom:8,lineHeight:1.5}}>
+              {"Bonus sacrifiés : "}{sacKeys.map((k,i)=>{
+                const pct=Math.round(tt.bonuses[k]*100);
+                const sign=k==="buildSpeed"||k==="shipCost"?"−":"+";
+                return(i>0?" · ":"")+sign+pct+"% "+sacLabel(k);
+              }).join("")}
+            </div>
+          )}
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(110px,1fr))",gap:5}}>
+            {items.map(item=>{
+              const isSel=selZone&&selZone.zone.name===item.zone.name&&selZone.cont.id===item.cont.id;
+              return(<div key={item.cont.id+"_"+item.zone.name}
+                onClick={()=>{AudioEngine.safeClick();setSelZone(item);}}
+                style={{padding:"7px 9px",borderRadius:6,cursor:"pointer",
+                  background:isSel?"rgba(80,180,120,0.3)":"rgba(15,30,50,0.6)",
+                  border:isSel?"1px solid #5acc80":"1px solid rgba(60,100,140,0.3)",
+                  transition:"all 0.15s"}}>
+                <div style={{fontSize:10,color:isSel?"#a0f0c0":"#aac8e0",fontWeight:"bold",marginBottom:2}}>{item.zone.name}</div>
+                <div style={{fontSize:8,color:"#6a8aaa",letterSpacing:0.5}}>{item.cont.name}</div>
+              </div>);
+            })}
+          </div>
+        </div>);
+      })}
+    </div>
+    <div style={{padding:"12px 16px",borderTop:"1px solid rgba(100,200,255,0.3)",background:"rgba(10,20,40,0.9)"}}>
+      <button onClick={confirm} disabled={!selZone}
+        style={{width:"100%",padding:"12px 16px",fontSize:12,fontWeight:"bold",letterSpacing:2,fontFamily:"'Share Tech Mono',monospace",
+          background:selZone?"linear-gradient(180deg,#4a8f5a,#2f6f3d)":"rgba(40,50,70,0.4)",
+          color:selZone?"#fff":"#5a7a9a",
+          border:selZone?"1px solid #6acc80":"1px solid rgba(60,100,140,0.2)",
+          borderRadius:6,cursor:selZone?"pointer":"not-allowed"}}>
+        {selZone?"FONDER LE QG ICI":"SÉLECTIONNE UNE ZONE"}
+      </button>
+    </div>
+  </div>);
+}
+
+// ────────────────────────────────────────────────────
+// PLAYERS PANEL — modern social/strategic interface
+// ────────────────────────────────────────────────────
+// Rough power score for a player: sum of building levels (×100) + resources hint
+// ────────────────────────────────────────────────────
+// POWER CALCULATION — Galaxia signature formula
+// Investment-based with non-linear scaling (square roots) and Galaxia-specific bonuses.
+// Different from OGame: sqrt scaling, branch bonus, habitability bonus, planet occupation bonus.
+// ────────────────────────────────────────────────────
+// Cumulative raw cost (sum of 3 resources) of building b from level 1 to lv
+function bldCumulCost(b,lv){
+  if(!b||lv<=0)return 0;
+  let total=0;
+  const baseSum=(b.base.metal||0)+(b.base.crystal||0)+(b.base.deut||0);
+  for(let i=0;i<lv;i++){total+=baseSum*Math.pow(b.factor,i);}
+  return Math.round(total);
+}
+// Cumulative raw cost of technology t from level 1 to lv
+function techCumulCost(t,lv){
+  if(!t||lv<=0)return 0;
+  let total=0;
+  const baseSum=(t.cost.metal||0)+(t.cost.crystal||0)+(t.cost.deut||0);
+  for(let i=0;i<lv;i++){total+=baseSum*Math.pow(t.factor||1.5,i);}
+  return Math.round(total);
+}
+// Single-ship raw cost (sum of 3 resources)
+function shipUnitCost(s){
+  if(!s)return 0;
+  return(s.cost.metal||0)+(s.cost.crystal||0)+(s.cost.deut||0);
+}
+// Habitability multiplier for a planet (paradisiac=0.9, hostile=1.1, etc.)
+function powerHabMult(planet){
+  if(!planet)return 1;
+  const h=habOf(planet);
+  if(h.l==="Paradisiaque")return 0.9;
+  if(h.l==="Habitable")return 0.95;
+  if(h.l==="Marginale")return 1.0;
+  if(h.l==="Hostile")return 1.05;
+  if(h.l==="Inhospitalier")return 1.1;
+  return 1;
+}
+// Branch bonus to total power (rewards strategic specialization)
+function powerBranchMult(branch){
+  if(branch==="mil")return 1.05;
+  if(branch==="exp")return 1.04;
+  if(branch==="eco")return 1.03;
+  return 1;
+}
+// Detailed power breakdown — sqrt-based, non-linear, signature Galaxia
+function playerPowerDetailed(state,planet){
+  if(!state)return{buildings:0,ships:0,tech:0,resources:0,colonies:0,total:0,raw:{buildings:0,ships:0,tech:0}};
+  // 1. Buildings — cumulative invested cost
+  let bldRaw=0;
+  const bld=state.buildings||{};
+  BUILDINGS.forEach(b=>{
+    const lv=bld[b.id]||0;
+    bldRaw+=bldCumulCost(b,lv);
+  });
+  // 2. Ships — cost × quantity
+  let shipRaw=0;
+  const shipsObj=state.ships||{};
+  SHIPS.forEach(s=>{
+    const q=shipsObj[s.id]||0;
+    shipRaw+=shipUnitCost(s)*q;
+  });
+  // 3. Technologies — cumulative
+  let techRaw=0;
+  const tech=state.tech||{};
+  TECHNOLOGIES.forEach(t=>{
+    const lv=tech[t.id]||0;
+    techRaw+=techCumulCost(t,lv);
+  });
+  // 4. Current resources — divided down a lot (you should build, not hoard)
+  const r=state.resources||{};
+  const resourcesScore=Math.floor(((r.metal||0)+(r.crystal||0)+(r.deut||0))/50);
+  // 5. Colonies — bonus per colonized planet (occupation matters)
+  const empCount=(state.empire||[]).length;
+  const coloniesScore=empCount*1500;
+  // Apply sqrt scaling with category-specific multipliers (signature curve)
+  const buildings=Math.round(Math.sqrt(bldRaw)*8);
+  const ships=Math.round(Math.sqrt(shipRaw)*12);
+  const techScore=Math.round(Math.sqrt(techRaw)*10);
+  // Apply branch and habitability bonuses
+  const branch=(state.missionFlags&&state.missionFlags.chosenBranch)||null;
+  const branchMult=powerBranchMult(branch);
+  const habMult=powerHabMult(planet);
+  const subtotal=buildings+ships+techScore+resourcesScore+coloniesScore;
+  const total=Math.round(subtotal*branchMult*habMult);
+  return{
+    buildings,ships,tech:techScore,resources:resourcesScore,colonies:coloniesScore,
+    total,
+    raw:{buildings:bldRaw,ships:shipRaw,tech:techRaw},
+    branchMult,habMult,
+  };
+}
+// Main power score — kept as a single-arg function for compatibility, with optional planet
+function playerPower(state,planet){
+  return playerPowerDetailed(state,planet).total;
+}
+// Convert a power score into a tier label (recalibrated for the new formula)
+function playerTier(power){
+  if(power>=80000)return{name:"Légendaire",color:"#ffd700",icon:"⭐"};
+  if(power>=30000)return{name:"Dominant",color:"#d46060",icon:"👑"};
+  if(power>=10000)return{name:"Imposant",color:"#9370db",icon:"🛡️"};
+  if(power>=3000)return{name:"Établi",color:"#4a9adf",icon:"⚔️"};
+  if(power>=500)return{name:"Naissant",color:"#50c878",icon:"🌱"};
+  return{name:"Débutant",color:"#7090a8",icon:"⚙️"};
+}
+// Compute a 2D distance between two planets (snapshot at t=0 of their 3D orbits)
+function planetDistance(p1,p2){
+  if(!p1||!p2)return 0;
+  // Use orbital position at angle=orbitAngle3d (initial), in the xz plane
+  const x1=Math.cos(p1.orbitAngle3d||0)*(p1.orbitRadius3d||0);
+  const z1=Math.sin(p1.orbitAngle3d||0)*(p1.orbitRadius3d||0);
+  const x2=Math.cos(p2.orbitAngle3d||0)*(p2.orbitRadius3d||0);
+  const z2=Math.sin(p2.orbitAngle3d||0)*(p2.orbitRadius3d||0);
+  const dx=x2-x1,dz=z2-z1;
+  return Math.sqrt(dx*dx+dz*dz);
+}
+// Format a distance value as "X.X al" (light-years, thematic flavor)
+function fmtDistance(d){
+  if(d<10)return d.toFixed(1)+" al";
+  if(d<100)return Math.round(d)+" al";
+  return (d/1000).toFixed(1)+" Kal";
+}
+// Determine relative-strength tag against the player's own power
+function strengthTag(myPower,theirPower){
+  if(myPower===0||theirPower===0)return null;
+  const ratio=theirPower/myPower;
+  if(ratio<0.5)return{label:"Faible",color:"#50c878",emoji:"🟢"};
+  if(ratio>2)return{label:"Fort",color:"#d46060",emoji:"🔴"};
+  return{label:"Égal",color:"#d4a850",emoji:"🟡"};
+}
+
+function PlayersPanel({user,planets,lp,idx,myState,activePlanetIdx,onPick,gSeed}){
+  const[subTab,setSubTab]=useState("empires"); // "empires" | "wilds" | "ranking"
+  const[search,setSearch]=useState("");
+  const[sort,setSort]=useState("power"); // "power" | "name" | "distance"
+  const[powerInfo,setPowerInfo]=useState(null); // when set, shows a power breakdown popup
+
+  // Build enriched player data once per render
+  // For each natal planet (50), determine if it has an occupant
+  const players=[];
+  const myPlanetIdx=idx;
+  const myNatalPlanet=planets[myPlanetIdx];
+  const myPower=myState?playerPower(myState,myNatalPlanet):0;
+  for(let i=0;i<planets.length;i++){
+    const p=planets[i];
+    if(p.isWild)continue;
+    const occ=lp.find(x=>x.idx===i);
+    const isMe=i===myPlanetIdx;
+    let st=null,branch=null,power=0,planetName=p.name,powerDetail=null;
+    if(isMe&&myState){st=myState;}
+    else if(occ){st=loadGS(occ.id);}
+    if(st){
+      branch=(st.missionFlags&&st.missionFlags.chosenBranch)||null;
+      powerDetail=playerPowerDetailed(st,p);
+      power=powerDetail.total;
+      planetName=st.planetName||p.name;
+    }
+    const distance=isMe?0:planetDistance(myNatalPlanet,p);
+    const tier=playerTier(power);
+    const tag=isMe?null:(st?strengthTag(myPower,power):null);
+    players.push({
+      idx:i,planet:p,occupant:occ,isMe,state:st,branch,power,powerDetail,tier,planetName,distance,tag,
+      name:isMe?user.name:(occ?occ.name:null),
+    });
+  }
+
+  // Sort/filter for empires tab
+  const filteredPlayers=players.filter(pl=>{
+    if(!pl.occupant&&!pl.isMe)return false; // empty slots are hidden in main view
+    if(search.trim()){
+      const q=search.toLowerCase();
+      const nameMatch=pl.name&&pl.name.toLowerCase().includes(q);
+      const planetMatch=pl.planetName&&pl.planetName.toLowerCase().includes(q);
+      if(!nameMatch&&!planetMatch)return false;
+    }
+    return true;
+  });
+  const sortedPlayers=filteredPlayers.slice().sort((a,b)=>{
+    // "Me" always pinned to top
+    if(a.isMe)return -1;
+    if(b.isMe)return 1;
+    if(sort==="name"){return (a.name||"").localeCompare(b.name||"");}
+    if(sort==="power"){return b.power-a.power;}
+    if(sort==="distance"){return a.distance-b.distance;}
+    return 0;
+  });
+
+  // Wild planets (filtered by search if any)
+  const myEmpire=(loadGS(user.id)||{}).empire||[];
+  const wilds=planets.filter(p=>p.isWild).map(p=>{
+    const globalIdx=planets.indexOf(p);
+    return{p,globalIdx,isMyColony:myEmpire.includes(globalIdx)};
+  }).filter(w=>{
+    if(!search.trim())return true;
+    return w.p.name.toLowerCase().includes(search.toLowerCase());
+  });
+
+  // Ranking — top players by power (only occupied slots, includes me)
+  const ranked=players.filter(pl=>pl.occupant||pl.isMe).slice().sort((a,b)=>b.power-a.power);
+  const myRank=ranked.findIndex(p=>p.isMe)+1;
+
+  const branchMeta={eco:{i:"💰",c:"#d4a850",n:"Économique"},mil:{i:"⚔️",c:"#d46060",n:"Militaire"},exp:{i:"🔭",c:"#60a0d4",n:"Exploration"}};
+
+  // Make a fake state for occupants we don't have local data for (fallback avatar)
+  const occupantState=(occ)=>{
+    const real=loadGS(occ.id);
+    return real||{profile:{},titles:[],cosmetics:[]};
+  };
+
+  // Power formatter
+  const powerFmt=(p)=>p>=1000?(p/1000).toFixed(p>=10000?0:1).replace(".0","")+"K":""+p;
+
+  // Player card renderer
+  const PlayerCard=({pl,rank})=>{
+    const bm=pl.branch?branchMeta[pl.branch]:null;
+    const ringCol=pl.isMe?"rgba(255,215,0,0.55)":(bm?bm.c+"66":"rgba(60,90,140,0.3)");
+    const bgCol=pl.isMe?"linear-gradient(135deg,rgba(80,60,20,0.35),rgba(40,30,10,0.4))":"rgba(8,16,30,0.6)";
+    const stForAvatar=pl.isMe?(myState||{}):(pl.occupant?occupantState(pl.occupant):{profile:{},titles:[],cosmetics:[]});
+    const avatarName=pl.name||"?";
+    return(
+      <div onClick={()=>onPick(pl.idx)} style={{
+        display:"flex",alignItems:"center",gap:10,padding:"10px 12px",
+        borderRadius:9,cursor:"pointer",
+        background:bgCol,
+        border:"1px solid "+ringCol,
+        transition:"transform 0.1s, border-color 0.15s",
+        boxShadow:pl.isMe?"0 0 12px rgba(255,215,0,0.18)":"none"
+      }}>
+        {rank&&(
+          <div style={{
+            minWidth:28,height:28,borderRadius:"50%",
+            display:"flex",alignItems:"center",justifyContent:"center",
+            fontFamily:"monospace",fontSize:11,fontWeight:"bold",
+            background:rank===1?"linear-gradient(135deg,#ffd700,#b8860b)":rank===2?"linear-gradient(135deg,#c0c0c0,#808080)":rank===3?"linear-gradient(135deg,#cd7f32,#8b4513)":"rgba(40,60,90,0.6)",
+            color:rank<=3?"#fff":"#9abcd8",
+            boxShadow:rank<=3?"0 0 8px "+(rank===1?"rgba(255,215,0,0.5)":rank===2?"rgba(192,192,192,0.4)":"rgba(205,127,50,0.4)"):"none",
+            flexShrink:0
+          }}>{rank<=3?(rank===1?"🥇":rank===2?"🥈":"🥉"):"#"+rank}</div>
+        )}
+        <div style={{position:"relative",flexShrink:0}}>
+          <PlayerAvatar name={avatarName} state={stForAvatar} size={36}/>
+          {bm&&<div style={{position:"absolute",bottom:-2,right:-2,width:14,height:14,borderRadius:"50%",background:"rgba(8,14,28,0.95)",border:"1px solid "+bm.c+"99",display:"flex",alignItems:"center",justifyContent:"center",fontSize:8,boxShadow:"0 0 4px "+bm.c+"66"}}>{bm.i}</div>}
+        </div>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap",marginBottom:3}}>
+            <span style={{fontSize:11,color:pl.isMe?"#ffd080":"#c8e0ff",fontFamily:"monospace",fontWeight:"bold",letterSpacing:0.5,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:120}}>{pl.name||"Inhabitée"}</span>
+            {pl.isMe&&<span style={{fontSize:7,padding:"1px 5px",borderRadius:3,background:"rgba(255,215,0,0.2)",border:"1px solid rgba(255,215,0,0.4)",color:"#ffd080",letterSpacing:1,fontWeight:"bold"}}>{"★ TOI"}</span>}
+            {pl.tag&&<span style={{fontSize:7,padding:"1px 5px",borderRadius:3,background:pl.tag.color+"22",border:"1px solid "+pl.tag.color+"66",color:pl.tag.color,letterSpacing:1,fontWeight:"bold"}}>{pl.tag.emoji+" "+pl.tag.label.toUpperCase()}</span>}
+          </div>
+          <div style={{fontSize:9,color:"#7090b0",fontFamily:"monospace",marginBottom:3,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{"🪐 "+pl.planetName+" · "+pl.planet.type}{!pl.isMe&&"  ·  📍 "+fmtDistance(pl.distance)}</div>
+          {pl.state&&(
+            <div style={{display:"flex",alignItems:"center",gap:8,fontSize:8,fontFamily:"monospace",flexWrap:"wrap"}}>
+              <span style={{color:pl.tier.color,fontWeight:"bold"}}>{pl.tier.icon+" "+pl.tier.name}</span>
+              <span onClick={e=>{e.stopPropagation();setPowerInfo(pl);}} style={{color:"#88a8c8",cursor:"pointer",textDecoration:"underline",textDecorationStyle:"dotted",textDecorationColor:"rgba(136,168,200,0.4)"}}>{"⚡ "+powerFmt(pl.power)}</span>
+              {bm&&<span style={{color:bm.c,opacity:0.7}}>{bm.n}</span>}
+            </div>
+          )}
+          {!pl.state&&!pl.isMe&&<div style={{fontSize:8,color:"#5a7a98",fontStyle:"italic"}}>{"Empire débutant"}</div>}
+        </div>
+        <div style={{fontSize:11,color:"#5a7aa0",fontFamily:"monospace",letterSpacing:1,flexShrink:0}}>{"→"}</div>
+      </div>
+    );
+  };
+
+  return(
+    <div style={{flex:1,display:"flex",flexDirection:"column",minHeight:0}}>
+      {/* Sub-tabs */}
+      <div style={{display:"flex",justifyContent:"center",gap:0,padding:"12px 8px 0",flexShrink:0}}>
+        {[["empires","👤","Empires"],["wilds","🌱","Sauvages"],["ranking","🏆","Top"]].map(t=>{
+          const active=subTab===t[0];
+          return(
+            <button key={t[0]} onClick={()=>{AudioEngine.safeSoftClick&&AudioEngine.safeSoftClick();setSubTab(t[0]);}} style={{
+              padding:"6px 14px",border:"none",cursor:"pointer",
+              background:active?"linear-gradient(180deg,rgba(60,120,200,0.25),rgba(30,80,160,0.15))":"transparent",
+              color:active?"#c8e8ff":"#5a7aa0",
+              fontFamily:"monospace",fontSize:10,letterSpacing:1.5,fontWeight:active?"bold":"normal",
+              borderBottom:active?"2px solid #4488cc":"2px solid transparent",
+              transition:"all 0.15s"
+            }}>{t[1]+" "+t[2].toUpperCase()}</button>
+          );
+        })}
+      </div>
+
+      {/* Search + sort (empires/wilds only) */}
+      {subTab!=="ranking"&&(
+        <div style={{display:"flex",gap:6,padding:"8px 10px",flexShrink:0}}>
+          <input type="text" placeholder={subTab==="empires"?"🔍 Rechercher un empire...":"🔍 Rechercher une planète..."} value={search} onChange={e=>setSearch(e.target.value)} style={{
+            flex:1,padding:"6px 10px",borderRadius:18,
+            border:"1px solid rgba(60,100,160,0.3)",
+            background:"rgba(6,12,24,0.7)",
+            color:"#c8e0ff",fontSize:16,
+            fontFamily:"monospace",outline:"none",minWidth:0
+          }}/>
+          {subTab==="empires"&&(
+            <select value={sort} onChange={e=>setSort(e.target.value)} style={{
+              padding:"6px 8px",borderRadius:18,
+              border:"1px solid rgba(60,100,160,0.3)",
+              background:"rgba(6,12,24,0.7)",
+              color:"#c8e0ff",fontSize:10,
+              fontFamily:"monospace",outline:"none",cursor:"pointer"
+            }}>
+              <option value="power">⚡ Puissance</option>
+              <option value="name">A-Z Nom</option>
+              <option value="distance">📍 Distance</option>
+            </select>
+          )}
+        </div>
+      )}
+
+      {/* Content area */}
+      <div style={{flex:1,overflowY:"auto",WebkitOverflowScrolling:"touch",overscrollBehavior:"contain",padding:"4px 10px 90px"}}>
+        {subTab==="empires"&&(
+          <div style={{display:"flex",flexDirection:"column",gap:6}}>
+            {sortedPlayers.length===0?(
+              <div style={{textAlign:"center",padding:"40px 20px",color:"#5a7aa0",fontFamily:"monospace",fontSize:10}}>{"Aucun empire trouvé"}</div>
+            ):sortedPlayers.map(pl=><PlayerCard key={pl.idx} pl={pl}/>)}
+            <div style={{fontSize:8,color:"#3a5070",letterSpacing:1.5,textAlign:"center",padding:"8px 0",fontFamily:"monospace"}}>{filteredPlayers.length+" empire"+(filteredPlayers.length>1?"s":"")+" sur 50 emplacements"}</div>
+          </div>
+        )}
+        {subTab==="wilds"&&(
+          <div>
+            <div style={{fontSize:9,color:"#7a9ac0",fontFamily:"monospace",padding:"6px 4px 10px",lineHeight:1.5,fontStyle:"italic"}}>{"🌱 Les frontières sauvages sont des planètes vierges, prêtes à être colonisées par des Vaisseaux Colonisateurs."}</div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))",gap:6}}>
+              {wilds.length===0?(
+                <div style={{gridColumn:"1/-1",textAlign:"center",padding:"40px 20px",color:"#5a7aa0",fontFamily:"monospace",fontSize:10}}>{"Aucune planète trouvée"}</div>
+              ):wilds.map(w=>{
+                const[c]=gc(w.p.type);
+                return(
+                  <div key={w.globalIdx} onClick={()=>onPick(w.globalIdx)} style={{
+                    display:"flex",alignItems:"center",gap:8,padding:"8px 10px",
+                    borderRadius:7,cursor:"pointer",
+                    background:w.isMyColony?"rgba(100,180,240,0.12)":"rgba(6,15,28,.6)",
+                    border:"1px solid "+(w.isMyColony?"#3060a0":"rgba(40,80,120,0.25)"),
+                    transition:"transform 0.1s"
+                  }}>
+                    <div style={{width:10,height:10,borderRadius:"50%",background:c,flexShrink:0,opacity:w.isMyColony?1:0.7,boxShadow:w.isMyColony?"0 0 6px "+c:"none"}}/>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontSize:10,color:w.isMyColony?"#aaccee":"#7090b0",fontFamily:"monospace",fontWeight:"bold",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{w.isMyColony?"🌱 ":""}{w.p.name}</div>
+                      <div style={{fontSize:8,color:w.isMyColony?"#6090c0":"#4a6a88",fontStyle:"italic"}}>{w.isMyColony?"Ma colonie":w.p.type}</div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <div style={{fontSize:8,color:"#3a5070",letterSpacing:1.5,textAlign:"center",padding:"12px 0 0",fontFamily:"monospace"}}>{wilds.length+" planète"+(wilds.length>1?"s":"")+" sauvage"+(wilds.length>1?"s":"")}</div>
+          </div>
+        )}
+        {subTab==="ranking"&&(
+          <div>
+            <div style={{padding:"6px 4px 12px",fontSize:9,color:"#7a9ac0",fontFamily:"monospace",lineHeight:1.5,fontStyle:"italic"}}>{"🏆 Classement des empires les plus puissants de la galaxie."}{myRank>0&&" Tu es "+(myRank===1?"#1 🥇":myRank===2?"#2 🥈":myRank===3?"#3 🥉":"#"+myRank)+"."}</div>
+            {/* Podium for top 3 */}
+            {ranked.length>=3&&(
+              <div style={{display:"flex",alignItems:"flex-end",justifyContent:"center",gap:6,padding:"10px 0 16px",marginBottom:6,borderBottom:"1px dashed rgba(60,100,160,0.2)"}}>
+                {[1,0,2].map(podiumIdx=>{
+                  const pl=ranked[podiumIdx];if(!pl)return null;
+                  const place=podiumIdx+1;
+                  const stForAvatar=pl.isMe?(myState||{}):(pl.occupant?occupantState(pl.occupant):{profile:{},titles:[],cosmetics:[]});
+                  const heights=[84,68,56];
+                  const colors=["#ffd700","#c0c0c0","#cd7f32"];
+                  return(
+                    <div key={pl.idx} onClick={()=>onPick(pl.idx)} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:5,cursor:"pointer",flex:"0 0 auto"}}>
+                      <div style={{position:"relative"}}>
+                        <PlayerAvatar name={pl.name||"?"} state={stForAvatar} size={place===1?52:42}/>
+                        <div style={{position:"absolute",top:-6,right:-6,fontSize:18}}>{place===1?"🥇":place===2?"🥈":"🥉"}</div>
+                      </div>
+                      <div style={{fontSize:9,color:pl.isMe?"#ffd080":"#c8e0ff",fontFamily:"monospace",fontWeight:"bold",maxWidth:80,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",textAlign:"center"}}>{pl.name}</div>
+                      <div style={{width:place===1?72:60,height:heights[podiumIdx],background:"linear-gradient(180deg,"+colors[podiumIdx]+"99,"+colors[podiumIdx]+"33)",borderRadius:"4px 4px 0 0",border:"1px solid "+colors[podiumIdx],display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontFamily:"monospace",fontSize:11,fontWeight:"bold",boxShadow:"0 0 12px "+colors[podiumIdx]+"55"}}>{powerFmt(pl.power)}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            {/* Rest of the ranking */}
+            <div style={{display:"flex",flexDirection:"column",gap:6}}>
+              {ranked.slice(3,15).map((pl,i)=><PlayerCard key={pl.idx} pl={pl} rank={i+4}/>)}
+            </div>
+            {ranked.length===0&&(
+              <div style={{textAlign:"center",padding:"40px 20px",color:"#5a7aa0",fontFamily:"monospace",fontSize:10}}>{"Aucun empire pour l'instant"}</div>
+            )}
+          </div>
+        )}
+      </div>
+      {/* Power breakdown modal */}
+      {powerInfo&&(()=>{
+        const pl=powerInfo;
+        const d=pl.powerDetail||{buildings:0,resources:0,colonies:0,total:0};
+        return(
+          <div onClick={()=>setPowerInfo(null)} style={{position:"fixed",inset:0,background:"rgba(0,5,15,0.92)",zIndex:700,display:"flex",alignItems:"center",justifyContent:"center",padding:"12px",overflowY:"auto",WebkitOverflowScrolling:"touch"}}>
+            <div onClick={e=>e.stopPropagation()} style={{width:"min(380px,100%)",maxHeight:"90vh",overflowY:"auto",WebkitOverflowScrolling:"touch",overscrollBehavior:"contain",background:"linear-gradient(180deg,rgba(15,25,45,0.98),rgba(8,16,30,0.98))",border:"1px solid rgba(80,140,200,0.5)",borderRadius:10,boxShadow:"0 0 30px rgba(80,140,200,0.3)",fontFamily:"monospace"}}>
+              <div style={{padding:"14px 16px",borderBottom:"1px solid rgba(60,90,140,0.3)",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                <div>
+                  <div style={{fontSize:12,color:"#c8e0ff",fontWeight:"bold",letterSpacing:1.5}}>{"⚡ PUISSANCE"}</div>
+                  <div style={{fontSize:9,color:"#7090b0",marginTop:2}}>{pl.name||"Inconnu"}{pl.tier?" · "+pl.tier.icon+" "+pl.tier.name:""}</div>
+                </div>
+                <button onClick={()=>setPowerInfo(null)} style={{background:"rgba(20,40,80,0.6)",border:"1px solid rgba(80,120,180,0.4)",color:"#9abcd8",cursor:"pointer",fontSize:11,padding:"4px 10px",borderRadius:4,fontFamily:"monospace",letterSpacing:2}}>{"×"}</button>
+              </div>
+              <div style={{padding:"14px 16px"}}>
+                <div style={{fontSize:9,color:"#8aa8cc",marginBottom:12,lineHeight:1.5}}>{"La puissance reflète l'investissement total d'un empire, calculée selon une courbe non-linéaire (racine carrée) qui valorise les efforts soutenus."}</div>
+                {[
+                  {label:"Bâtiments",icon:"🏗️",value:d.buildings,desc:"√(coûts cumulés) × 8",color:"#4a9adf"},
+                  {label:"Vaisseaux",icon:"🚀",value:d.ships,desc:"√(coûts de flotte) × 12",color:"#d46060"},
+                  {label:"Recherches",icon:"🔬",value:d.tech,desc:"√(coûts de techno) × 10",color:"#9370db"},
+                  {label:"Ressources",icon:"💎",value:d.resources,desc:"Stock total ÷ 50",color:"#50c878"},
+                  {label:"Colonies",icon:"🌱",value:d.colonies,desc:"1 500 par colonie",color:"#d4a850"},
+                ].filter(row=>row.value>0).map(row=>(
+                  <div key={row.label} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 10px",marginBottom:6,background:"rgba(8,16,30,0.6)",borderRadius:6,border:"1px solid "+row.color+"33"}}>
+                    <span style={{fontSize:18}}>{row.icon}</span>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontSize:10,color:row.color,fontWeight:"bold",letterSpacing:0.5}}>{row.label}</div>
+                      <div style={{fontSize:8,color:"#7090b0",fontStyle:"italic"}}>{row.desc}</div>
+                    </div>
+                    <div style={{fontSize:13,color:row.color,fontWeight:"bold"}}>{powerFmt(row.value)}</div>
+                  </div>
+                ))}
+                {/* Multipliers (branch + habitability) */}
+                {(d.branchMult&&d.branchMult!==1)||(d.habMult&&d.habMult!==1)?(
+                  <div style={{padding:"8px 10px",marginBottom:6,background:"rgba(20,15,30,0.5)",borderRadius:6,border:"1px dashed rgba(150,120,200,0.3)"}}>
+                    <div style={{fontSize:8,color:"#9080a8",letterSpacing:1,marginBottom:4,fontWeight:"bold"}}>{"MULTIPLICATEURS"}</div>
+                    {d.branchMult&&d.branchMult!==1&&(
+                      <div style={{fontSize:9,color:"#b8a0d8",display:"flex",justifyContent:"space-between",marginBottom:2}}>
+                        <span>{"Spécialisation de branche"}</span>
+                        <span style={{fontWeight:"bold"}}>{"×"+d.branchMult.toFixed(2)}</span>
+                      </div>
+                    )}
+                    {d.habMult&&d.habMult!==1&&(
+                      <div style={{fontSize:9,color:"#b8a0d8",display:"flex",justifyContent:"space-between"}}>
+                        <span>{"Habitabilité planétaire"}</span>
+                        <span style={{fontWeight:"bold"}}>{"×"+d.habMult.toFixed(2)}</span>
+                      </div>
+                    )}
+                  </div>
+                ):null}
+                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginTop:10,padding:"10px 12px",background:"rgba(50,80,140,0.25)",borderRadius:6,border:"1px solid rgba(120,180,240,0.4)"}}>
+                  <span style={{fontSize:11,color:"#c8e0ff",fontWeight:"bold",letterSpacing:1}}>{"⚡ TOTAL"}</span>
+                  <span style={{fontSize:16,color:"#c8e0ff",fontWeight:"bold"}}>{powerFmt(d.total)}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+    </div>
+  );
+}
+
+
+// Modal that lets the player pick one of 3 random eligible techs to gain a free level.
+// Triggered when state.pendingTechCredits > 0 from anomaly Etude reward.
+function TechChoiceModal({state,onChoose,onClose}){
+  // Pick 3 eligible techs from TECHNOLOGIES
+  // Eligibility: not maxed, labRequired met, branch matches (or null), tech_colonization excluded if level reached
+  var labLvl=(state&&state.buildings&&state.buildings.laboratoire)||0;
+  var playerBranch=(state&&state.missionFlags&&state.missionFlags.chosenBranch)||null;
+  var eligible=[];
+  for(var i=0;i<TECHNOLOGIES.length;i++){
+    var t=TECHNOLOGIES[i];
+    var curLvl=(state&&state.tech&&state.tech[t.id])||0;
+    if(curLvl>=t.maxLevel)continue;
+    if(t.labRequired&&labLvl<t.labRequired)continue;
+    // Branch tech only available if player is on that branch (or no branch)
+    if(t.branch&&playerBranch&&t.branch!==playerBranch)continue;
+    eligible.push(t);
+  }
+  // Shuffle and pick 3
+  var picked=[];
+  if(eligible.length<=3){picked=eligible.slice();}
+  else{
+    var pool=eligible.slice();
+    for(var j=0;j<3;j++){
+      var idx=Math.floor(Math.random()*pool.length);
+      picked.push(pool[idx]);
+      pool.splice(idx,1);
+    }
+  }
+  if(picked.length===0){
+    // No eligible tech — auto-cancel and refund as a boost
+    return (
+      <div onClick={onClose} style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,8,0.85)",zIndex:9998,display:"flex",alignItems:"center",justifyContent:"center",padding:20,backdropFilter:"blur(8px)"}}>
+        <div onClick={function(e){e.stopPropagation();}} style={{background:"linear-gradient(145deg,rgba(20,15,35,0.98),rgba(10,8,20,0.98))",border:"1px solid #6644aa",borderRadius:10,padding:18,maxWidth:400,fontFamily:"monospace",color:"#d8b8ff"}}>
+          <div style={{fontSize:13,fontWeight:"bold",marginBottom:8,color:"#fff"}}>{"\u{1F52C} DONNEES DE RECHERCHE"}</div>
+          <div style={{fontSize:10,color:"#9a8ac0",marginBottom:14,lineHeight:1.5}}>{"Aucune technologie n\u2019est actuellement \u00E9ligible (toutes ma\u00EEtris\u00E9es ou pr\u00E9requis manquants). Le cr\u00E9dit est conserv\u00E9 pour plus tard."}</div>
+          <button onClick={onClose} style={{width:"100%",padding:"8px 0",background:"rgba(60,40,90,0.85)",border:"1px solid #8866cc",borderRadius:6,color:"#fff",fontSize:10,cursor:"pointer",fontFamily:"monospace",fontWeight:"bold",letterSpacing:1}}>{"FERMER"}</button>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div onClick={onClose} style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,8,0.85)",zIndex:9998,display:"flex",alignItems:"center",justifyContent:"center",padding:20,backdropFilter:"blur(8px)"}}>
+      <div onClick={function(e){e.stopPropagation();}} style={{background:"linear-gradient(145deg,rgba(20,15,35,0.98),rgba(10,8,20,0.98))",border:"1px solid #6644aa",borderRadius:10,padding:18,maxWidth:520,width:"100%",maxHeight:"90vh",overflowY:"auto",fontFamily:"monospace",color:"#d8b8ff",boxShadow:"0 0 30px rgba(170,100,255,0.4)"}}>
+        <div style={{borderBottom:"1px solid #4a3070",paddingBottom:10,marginBottom:12}}>
+          <div style={{fontSize:14,fontWeight:"bold",letterSpacing:1,color:"#fff"}}>{"\u{1F52C} DONN\u00C9ES DE RECHERCHE"}</div>
+          <div style={{fontSize:9,color:"#9a8ac0",marginTop:6,lineHeight:1.4}}>{"Ton expedition a r\u00E9cup\u00E9r\u00E9 des donn\u00E9es technologiques. Choisis une recherche \u00E0 d\u00E9bloquer (+1 niveau gratuit) :"}</div>
+        </div>
+        {picked.map(function(t){
+          var curLvl=(state&&state.tech&&state.tech[t.id])||0;
+          return (
+            <div key={t.id} onClick={function(){onChoose(t.id);}} style={{background:"rgba(40,25,70,0.5)",border:"1px solid #5588cc",borderRadius:8,padding:10,marginBottom:8,cursor:"pointer"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <div style={{fontSize:11,fontWeight:"bold",color:"#fff",letterSpacing:0.5}}>{t.name}</div>
+                <div style={{fontSize:9,color:"#a8e0a8",fontWeight:"bold"}}>{"Niv "+curLvl+" \u2192 "+(curLvl+1)}</div>
+              </div>
+              <div style={{fontSize:8,color:"#9a8ac0",marginTop:4,lineHeight:1.3}}>{t.desc}</div>
+            </div>
+          );
+        })}
+        <button onClick={onClose} style={{width:"100%",padding:"8px 0",background:"rgba(20,15,30,0.8)",border:"1px solid #4a3070",borderRadius:6,color:"#9a8ac0",fontSize:9,cursor:"pointer",fontFamily:"monospace",letterSpacing:1,marginTop:4}}>{"PLUS TARD"}</button>
+      </div>
+    </div>
+  );
+}
+
+function Dash({user,onOut}){
+  const{gSeed,idx}=slotOf(user.id);
+  // Populate the galaxy with fictional players (run-once per gSeed)
+  seedBots(gSeed,idx);
+  const[planets]=useState(()=>{
+    const natals=Array.from({length:50},(_,i)=>mkP(gSeed,i));
+    // Wild planets occupy the outer ring, 100 planets in wave 0 (initial batch).
+    const wilds=Array.from({length:100},(_,i)=>mkP(gSeed,i,{isWild:true,waveOffset:0}));
+    return[...natals,...wilds];
+  });
+  const[tab,setTab]=useState("galaxy");
+  const[viewer,setViewer]=useState(null),[panel,setPanel]=useState(false);
+  const[galaxyFS,setGalaxyFS]=useState(false);
+  const[explorationMode,setExplorationMode]=useState(false);
+  const[anomalyToast,setAnomalyToast]=useState(null);
+  const[showTechChoice,setShowTechChoice]=useState(false);
+  const lastNotifIdsRef=useRef(new Set());
+  // Dock auto-hide on scroll inside Missions/Empire — shows up when scrolling up, hides when scrolling down
+  const[dockVisible,setDockVisible]=useState(true);
+  const lastScrollYRef=useRef(0);
+  const handleInlineScroll=(e)=>{
+    const el=e.target;
+    const y=el.scrollTop;
+    const maxY=el.scrollHeight-el.clientHeight;
+    // Ignore overscroll bounces (iOS): when y goes negative or above the max,
+    // the browser will animate back, generating fake "upward" scroll events that
+    // would incorrectly reveal the dock. We clamp and skip those.
+    if(y<0||y>maxY+1){lastScrollYRef.current=Math.max(0,Math.min(y,maxY));return;}
+    const dy=y-lastScrollYRef.current;
+    lastScrollYRef.current=y;
+    if(dy>3&&y>40)setDockVisible(false); // scroll down → hide
+    else if(dy<-3&&y<maxY-2)setDockVisible(true); // scroll up → show (only when not at the very bottom)
+    // Also show the dock when the user reaches the very top
+    if(y<=4)setDockVisible(true);
+  };
+  // Watch for new anomaly notifications and display them as toasts
+  useEffect(()=>{
+    if(!myState||!myState.anomalyNotifs||myState.anomalyNotifs.length===0)return;
+    var seen=lastNotifIdsRef.current;
+    var newest=null;
+    for(var i=0;i<myState.anomalyNotifs.length;i++){
+      var n=myState.anomalyNotifs[i];
+      if(!seen.has(n.id)){
+        seen.add(n.id);
+        newest=n;
+      }
+    }
+    if(newest){
+      setAnomalyToast(newest);
+      // Auto-clear toast after 8 seconds
+      setTimeout(function(){setAnomalyToast(null);},8000);
+      // If outcome was "tech", trigger the tech choice modal
+      // Note: we look in fleets history via pendingTechCredits
+      if(myState.pendingTechCredits&&myState.pendingTechCredits>0){
+        setShowTechChoice(true);
+      }
+      // Clean up old notifs from state (keep only last 5)
+      if(myState.anomalyNotifs.length>5){
+        var trimmed=myState.anomalyNotifs.slice(-5);
+        var ns={...myState,anomalyNotifs:trimmed};
+        saveGS(user.id,ns);
+        if(activePlanetIdx===null)setMyState(ns);
+      }
+    }
+  });
+  useEffect(()=>{
+    setDockVisible(true);
+    lastScrollYRef.current=0;
+  },[tab]);
+  const[myState,setMyState]=useState(null);
+  // Active planet: which of the user's planets is currently being managed.
+  // null = natal planet (default); otherwise = global planet index of a colony.
+  const[activePlanetIdx,setActivePlanetIdx]=useState(null);
+  const[showEmpire,setShowEmpire]=useState(false);
+  const[threeOk,setThreeOk]=useState(!!window.THREE);
+  const[selResource,setSelResource]=useState(null);
+  const[showMissions,setShowMissions]=useState(false);
+  const[showProfile,setShowProfile]=useState(false);
+  const lp=(()=>{const u=loadUsers();return Object.values(u).map(x=>{
+    // Bots have their slot stored directly; real users use slotOf(id)
+    if(x.botSlot!==undefined&&x.botGSeed!==undefined){return{gSeed:x.botGSeed,idx:x.botSlot,name:x.name,id:x.id};}
+    return{...slotOf(x.id),name:x.name,id:x.id};
+  }).filter(x=>x.gSeed===gSeed);})();
+  // The active planet depends on activePlanetIdx. When null, it's the natal planet.
+  const activeIdx=activePlanetIdx!==null?activePlanetIdx:idx;
+  const mine=planets[activeIdx];
+  // Natal planet (always kept as reference for empire metadata)
+  const natal=planets[idx];
+  useEffect(()=>{
+    if(window.THREE){setThreeOk(true);return;}
+    const s=document.createElement("script");s.src=["https","//cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"].join(":");s.onload=()=>setThreeOk(true);document.head.appendChild(s);
+  },[]);
+  useEffect(()=>{
+    // Load the natal state on first mount
+    const s=loadGS(user.id);
+    const st=s?tickGS(s,natal):initState(natal);
+    setMyState(st);saveGS(user.id,st);
+  },[]);
+  // Whenever activePlanetIdx changes, load the appropriate state (natal or colony)
+  useEffect(()=>{
+    if(activePlanetIdx===null){
+      const s=loadGS(user.id);
+      if(s)setMyState(tickGS(s,natal));
+    }else{
+      const c=loadColony(user.id,activePlanetIdx);
+      if(c)setMyState(tickGS(c,planets[activePlanetIdx]));
+    }
+  },[activePlanetIdx]);
+  const pick=i=>{
+    AudioEngine.safeClick();setGalaxyFS(false);setViewer(planets[i]);
+    // Track "visited other planet" mission flags + unique planet count.
+    // IMPORTANT: we always read/write NATAL state here (not activePlanet state),
+    // and we reload fresh from localStorage to avoid a stale React closure
+    // overwriting newer data (e.g. missionsClaimed from a recently-claimed mission).
+    if(i!==idx){
+      const fresh=loadGS(user.id);
+      if(!fresh)return;
+      const visitedSet=new Set(fresh.missionFlags&&fresh.missionFlags.visitedPlanets||[]);
+      visitedSet.add(i);
+      const ns={
+        ...fresh,
+        missionFlags:{
+          ...(fresh.missionFlags||{}),
+          visitedOtherPlanet:true,
+          visitedPlanets:Array.from(visitedSet),
+          visitedPlanetCount:visitedSet.size
+        }
+      };
+      saveGS(user.id,ns);
+      // Only refresh myState if the user is currently viewing the natal planet
+      if(activePlanetIdx===null)setMyState(ns);
+    }
+  };
+  const handleStateChange=ns=>{
+    setMyState(ns);
+    if(activePlanetIdx===null)saveGS(user.id,ns);
+    else saveColony(user.id,activePlanetIdx,ns);
+  };
+  // Handle colonization: ALWAYS reads/updates the NATAL state (resources + ship come from home planet)
+  // Requires: tech_colonization researched + 1 Colonisateur ship in the natal fleet.
+  // The ship is consumed on founding.
+  const handleColonize=(targetIdx)=>{
+    const target=planets[targetIdx];
+    if(!target||!target.isWild)return;
+    // Always operate on natal state, not current activePlanetIdx
+    const natSt=loadGS(user.id);
+    if(!natSt)return;
+    const empire=natSt.empire||[];
+    if(empire.includes(targetIdx))return;
+    const qgLv=(natSt.buildings&&natSt.buildings.qg)||0;
+    const maxCol=maxColoniesFor(qgLv);
+    if(empire.length>=maxCol)return;
+    // Check tech
+    if(getTechLevel(natSt,"tech_colonization")<1)return;
+    // Check ship
+    if(((natSt.ships||{}).colonisateur||0)<1)return;
+    // No more resource cost — the ship IS the cost
+    const newNatal={
+      ...natSt,
+      ships:{...(natSt.ships||{}),colonisateur:Math.max(0,((natSt.ships||{}).colonisateur||0)-1)},
+      empire:[...empire,targetIdx]
+    };
+    saveGS(user.id,newNatal);
+    // Create colony state with a starting package
+    const colony=initState(target);
+    colony.resources={metal:1000,crystal:600,deut:200};
+    colony.isColony=true;
+    colony.foundedAt=Date.now();
+    saveColony(user.id,targetIdx,colony);
+    if(activePlanetIdx===null)setMyState(newNatal);
+    setViewer(null);
+    setShowEmpire(true);
+  };
+  const handleQGPlacement=(item)=>{
+    if(!myState)return;
+    const ns={
+      ...myState,
+      buildings:{...myState.buildings,qg:1},
+      continents:(myState.continents||[]).map(c=>{
+        if(c.id!==item.cont.id)return c;
+        return{...c,zones:c.zones.map(z=>z.name===item.zone.name?{...z,building:"qg"}:z)};
+      }),
+      needsQGPlacement:false
+    };
+    ns.zones=ns.continents.flatMap(c=>c.zones);
+    setMyState(ns);saveGS(user.id,ns);
+  };
+  const handleClaimMission=(m,branchKey)=>{
+    // Missions always operate on natal state (progression is empire-wide, not per-planet)
+    const natSt=loadGS(user.id);
+    if(!natSt)return;
+    // Branch choice missions: set the chosen branch flag, this auto-completes the check
+    if(m.branchChoice){
+      if(!branchKey)return;
+      const ns1={...natSt,missionFlags:{...(natSt.missionFlags||{}),chosenBranch:branchKey}};
+      // Re-check now that branch is set (should be true since check only requires chosenBranch)
+      if(!m.check(ns1))return;
+      const existingTitles=ns1.titles||[];
+      const existingCosmetics=ns1.cosmetics||[];
+      const cosmeticUnlock=COSMETIC_UNLOCKS[m.id];
+      const newCosmeticId=cosmeticUnlock?cosmeticUnlock.category+":"+cosmeticUnlock.itemId:null;
+      const updatedCosmetics=newCosmeticId&&!existingCosmetics.includes(newCosmeticId)?[...existingCosmetics,newCosmeticId]:existingCosmetics;
+      const ns={
+        ...ns1,
+        resources:{
+          metal:Math.min(getMaxStorage(ns1),(ns1.resources.metal||0)+(m.reward.metal||0)),
+          crystal:Math.min(getMaxStorage(ns1),(ns1.resources.crystal||0)+(m.reward.crystal||0)),
+          deut:Math.min(getMaxStorage(ns1),(ns1.resources.deut||0)+(m.reward.deut||0))
+        },
+        missionsClaimed:[...(ns1.missionsClaimed||[]),m.id],
+        titles:m.reward.title&&!existingTitles.includes(m.reward.title)?[...existingTitles,m.reward.title]:existingTitles,
+        cosmetics:updatedCosmetics
+      };
+      saveGS(user.id,ns);
+      if(activePlanetIdx===null)setMyState(ns);
+      if(AudioEngine.safeBuildDone)AudioEngine.safeBuildDone();
+      return;
+    }
+    if((natSt.missionsClaimed||[]).includes(m.id))return;
+    if(!m.check(natSt))return;
+    const existingTitles=natSt.titles||[];
+    const existingCosmetics=natSt.cosmetics||[];
+    const cosmeticUnlock=COSMETIC_UNLOCKS[m.id];
+    const newCosmeticId=cosmeticUnlock?cosmeticUnlock.category+":"+cosmeticUnlock.itemId:null;
+    const updatedCosmetics=newCosmeticId&&!existingCosmetics.includes(newCosmeticId)?[...existingCosmetics,newCosmeticId]:existingCosmetics;
+    const ns={
+      ...natSt,
+      resources:{
+        metal:Math.min(getMaxStorage(natSt),(natSt.resources.metal||0)+(m.reward.metal||0)),
+        crystal:Math.min(getMaxStorage(natSt),(natSt.resources.crystal||0)+(m.reward.crystal||0)),
+        deut:Math.min(getMaxStorage(natSt),(natSt.resources.deut||0)+(m.reward.deut||0))
+      },
+      missionsClaimed:[...(natSt.missionsClaimed||[]),m.id],
+      titles:m.reward.title&&!existingTitles.includes(m.reward.title)?[...existingTitles,m.reward.title]:existingTitles,
+      cosmetics:updatedCosmetics
+    };
+    saveGS(user.id,ns);
+    if(activePlanetIdx===null)setMyState(ns);
+    if(AudioEngine.safeBuildDone)AudioEngine.safeBuildDone();
+  };
+  const safeL="env(safe-area-inset-left,0px)",safeR="env(safe-area-inset-right,0px)";
+  return(<div style={{width:"100vw",height:"100svh",minHeight:"100dvh",maxHeight:"100dvh",background:"#000005",display:"flex",flexDirection:"column",overflow:"hidden",paddingBottom:"env(safe-area-inset-bottom,0px)"}}>
+      {selResource&&myState&&<ResourceInfoModal type={selResource} state={{...myState,planetType:mine.type}} planet={mine} onClose={()=>setSelResource(null)}/>}
+      {explorationMode&&threeOk&&<ExplorationMode planets={planets} playerIdx={idx} gSeed={gSeed} anomalies={myState&&myState.anomalies?myState.anomalies:[]} myState={myState} onLaunchAnomalyFleet={(fleet)=>{
+        // Add the anomaly fleet to state and save
+        const cur=loadGS(user.id);
+        if(!cur)return false;
+        // Verify resources/cargos still available
+        const cargosNeeded=fleet.ships.cargo||0;
+        const fuelNeeded=fleet.fuelCost||0;
+        if((cur.ships&&cur.ships.cargo||0)<cargosNeeded){alert("Cargos insuffisants");return false;}
+        if((cur.resources&&cur.resources.deut||0)<fuelNeeded){alert("Deut\u00E9rium insuffisant");return false;}
+        // Deduct cargos and fuel
+        const ns={...cur,ships:{...(cur.ships||{}),cargo:(cur.ships.cargo||0)-cargosNeeded},resources:{...cur.resources,deut:(cur.resources.deut||0)-fuelNeeded},fleets:[...(cur.fleets||[]),fleet]};
+        saveGS(user.id,ns);
+        if(activePlanetIdx===null)setMyState(ns);
+        return true;
+      }} onClose={()=>setExplorationMode(false)}/>}
+      {anomalyToast?(function(){
+        var n=anomalyToast;
+        var rw=n.reward;
+        var msg="";
+        if(!n.success){msg="L\u2019anomalie a expir\u00E9 avant l\u2019arriv\u00E9e de la flotte. Carburant perdu.";}
+        else if(rw){
+          if(rw.kind==="resources"){
+            var parts=[];
+            if(rw.metal>0)parts.push("+"+rw.metal+" m\u00E9tal");
+            if(rw.crystal>0)parts.push("+"+rw.crystal+" cristal");
+            if(rw.deut>0)parts.push("+"+rw.deut+" deut");
+            msg="Exp\u00E9dition r\u00E9ussie ! "+parts.join(", ");
+          } else if(rw.kind==="boost"){
+            msg="Boost +"+rw.percent+"% "+rw.boostType+" pendant "+(rw.durationMs/3600000)+"h !";
+          } else {
+            // tech_or_boost — message depends on what state was actually updated
+            if(myState&&myState.pendingTechCredits&&myState.pendingTechCredits>0){
+              msg="Donn\u00E9es de recherche r\u00E9cup\u00E9r\u00E9es ! Choisis une technologie \u00E0 d\u00E9bloquer.";
+            } else {
+              msg="Boost +"+(rw.boostPercent||30)+"% prod globale "+((rw.boostDurationMs||7200000)/3600000)+"h !";
+            }
+          }
+        }
+        return (
+          <div onClick={()=>setAnomalyToast(null)} style={{position:"fixed",top:"calc(70px + env(safe-area-inset-top,0px))",left:"50%",transform:"translateX(-50%)",zIndex:9999,padding:"12px 18px",background:n.success?"linear-gradient(135deg,rgba(40,80,50,0.95),rgba(20,50,30,0.95))":"linear-gradient(135deg,rgba(80,40,40,0.95),rgba(50,20,20,0.95))",border:"1px solid "+(n.success?"#66cc88":"#cc6666"),borderRadius:8,color:"#fff",fontSize:11,fontFamily:"monospace",fontWeight:"bold",letterSpacing:0.5,maxWidth:"90vw",backdropFilter:"blur(8px)",boxShadow:"0 4px 20px rgba(0,0,0,0.5)",cursor:"pointer",textAlign:"center"}}>{(n.success?"\u{1F30C} ":"\u26A0\uFE0F ")+msg}</div>
+        );
+      })():null}
+      {showTechChoice&&myState&&myState.pendingTechCredits>0?<TechChoiceModal state={myState} onChoose={function(techId){
+        // Apply: +1 level on chosen tech, decrement pendingTechCredits
+        var cur=loadGS(user.id);
+        if(!cur)return;
+        var newTech={...(cur.tech||{})};
+        newTech[techId]=(newTech[techId]||0)+1;
+        var ns={...cur,tech:newTech,pendingTechCredits:Math.max(0,(cur.pendingTechCredits||1)-1)};
+        saveGS(user.id,ns);
+        if(activePlanetIdx===null)setMyState(ns);
+        setShowTechChoice(false);
+      }} onClose={function(){setShowTechChoice(false);}}/>:null}
+      {showMissions&&<MissionsModal state={activePlanetIdx===null?myState:loadGS(user.id)} onClaim={handleClaimMission} onClose={()=>setShowMissions(false)}/>}
+      {showEmpire&&<EmpireModal userId={user.id} planets={planets} natalIdx={idx} activePlanetIdx={activePlanetIdx} onSwitch={newIdx=>setActivePlanetIdx(newIdx)} onClose={()=>setShowEmpire(false)}/>}
+      {showProfile&&(()=>{
+        const profState=activePlanetIdx===null?myState:loadGS(user.id);
+        if(!profState)return null;
+        const profStateChange=(ns)=>{saveGS(user.id,ns);if(activePlanetIdx===null)setMyState(ns);};
+        return(<ProfileModal user={user} state={profState} onStateChange={profStateChange} onClose={()=>setShowProfile(false)}/>);
+      })()}
+      {viewer&&(()=>{
+        // Load natal state fresh for colonization context (works even when viewing a colony)
+        const natSt=loadGS(user.id);
+        const empire=(natSt&&natSt.empire)||[];
+        const isMyColony=empire.includes(viewer.i);
+        const isMyPlanet=viewer.i===idx||isMyColony;
+        // When visiting a colony I own, show its own state
+        let viewerState=null;
+        if(viewer.i===idx)viewerState=activePlanetIdx===null?myState:natSt;
+        else if(isMyColony)viewerState=loadColony(user.id,viewer.i);
+        const viewerStateChange=isMyPlanet?(ns=>{
+          if(viewer.i===idx)saveGS(user.id,ns);
+          else saveColony(user.id,viewer.i,ns);
+          // Refresh active state if it matches
+          if((activePlanetIdx===null&&viewer.i===idx)||activePlanetIdx===viewer.i)setMyState(ns);
+        }):null;
+        return(<Viewer3D planet={viewer} allPlanets={planets} onClose={()=>setViewer(null)} isPlayer={isMyPlanet} owner={(lp.find(p=>p.idx===viewer.i)&&lp.find(p=>p.idx===viewer.i).name)} state={viewerState} onStateChange={viewerStateChange} onManage={null} userId={user&&user.id} natalState={natSt} onColonize={viewer.isWild?(()=>handleColonize(viewer.i)):null} alreadyColonized={isMyColony}/>);
+      })()}
+      {panel&&myState&&<PlanetPanel planet={mine} userId={user.id} planets={planets} myIdx={idx} onClose={()=>setPanel(false)} onStateChange={handleStateChange} onViewPlanet={()=>{setPanel(false);setViewer(mine);}}/>}
+      {/* Floating top HUD — translucent, hovers above the galaxy 3D. Hidden on Missions/Empire to free up space */}
+      {(tab==="galaxy"||tab==="players")&&<div style={{position:"absolute",top:0,left:0,right:0,zIndex:20,padding:"6px 8px",paddingLeft:"calc(8px + "+safeL+")",paddingRight:"calc(8px + "+safeR+")",pointerEvents:"none",height:48}}>
+        {/* Left: Avatar with branch badge */}
+        <div style={{position:"absolute",top:6,left:"calc(8px + "+safeL+")",display:"flex",alignItems:"center",gap:8,pointerEvents:"auto"}}>
+          {myState&&(()=>{
+            const cosmeticState=activePlanetIdx===null?myState:loadGS(user.id);
+            if(!cosmeticState)return null;
+            const branch=cosmeticState.missionFlags&&cosmeticState.missionFlags.chosenBranch;
+            const branchMeta={eco:{i:"💰",c:"#d4a850"},mil:{i:"⚔️",c:"#d46060"},exp:{i:"🔭",c:"#60a0d4"}};
+            const bm=branch&&branchMeta[branch];
+            return(
+              <div style={{position:"relative",display:"flex",alignItems:"center",gap:8}}>
+                <div style={{position:"relative"}}>
+                  <PlayerAvatar name={user.name} state={cosmeticState} size={32} onClick={()=>{AudioEngine.safeClick&&AudioEngine.safeClick();setShowProfile(true);}}/>
+                  {bm&&<div style={{position:"absolute",bottom:-2,right:-2,width:14,height:14,borderRadius:"50%",background:"rgba(8,14,28,0.95)",border:"1px solid "+bm.c+"99",display:"flex",alignItems:"center",justifyContent:"center",fontSize:8,boxShadow:"0 0 4px "+bm.c+"66"}}>{bm.i}</div>}
+                </div>
+                {myState&&myState.anomalies&&myState.anomalies.length>0?<div style={{padding:"4px 8px",background:"rgba(40,30,80,0.85)",border:"1px solid #6644aa",borderRadius:6,color:"#d8b8ff",fontSize:10,fontFamily:"monospace",fontWeight:"bold",letterSpacing:0.5,backdropFilter:"blur(4px)"}}>{"\u{1F30C}"} {myState.anomalies.length}</div>:null}
+              </div>
+            );
+          })()}
+        </div>
+        {/* Resources pill — anchored to the right. Reserves room for the fullscreen button only on the Galaxy tab. */}
+        <div style={{position:"absolute",top:6,right:tab==="galaxy"?"calc(50px + "+safeR+")":"calc(10px + "+safeR+")",pointerEvents:"auto",transition:"right 0.2s ease-out"}}>
+          {myState&&(()=>{
+            const maxM=getMaxStorage(myState,"metal",mine);
+            const maxC=getMaxStorage(myState,"crystal",mine);
+            const maxD=getMaxStorage(myState,"deut",mine);
+            const colForPct=(cur,max)=>{const p=cur/max;return p>=0.95?"#ff7050":p>=0.8?"#ffcc40":null;};
+            const mM=myState.resources.metal,mC=myState.resources.crystal,mD=myState.resources.deut;
+            const wM=colForPct(mM,maxM),wC=colForPct(mC,maxC),wD=colForPct(mD,maxD);
+            const r=eRatio(myState.buildings||{},mine,myState,myState.zones);
+            const eCol=r<0.5?"#ff7050":r<1?"#ffcc40":"#7adda0";
+            return(
+              <div style={{display:"flex",gap:10,fontSize:10,fontFamily:"monospace",alignItems:"center",padding:"6px 14px",background:"rgba(6,12,24,0.55)",backdropFilter:"blur(10px)",WebkitBackdropFilter:"blur(10px)",border:"1px solid rgba(60,100,160,0.25)",borderRadius:20,boxShadow:"0 2px 12px rgba(0,10,40,0.4)",whiteSpace:"nowrap"}}>
+                <span onClick={()=>{AudioEngine.safeSoftClick&&AudioEngine.safeSoftClick();setSelResource("metal");}} style={{color:wM||"#9abcd8",cursor:"pointer",fontWeight:"bold"}}>{"⛏️ "}{fmt(mM)}</span>
+                <span onClick={()=>{AudioEngine.safeSoftClick&&AudioEngine.safeSoftClick();setSelResource("crystal");}} style={{color:wC||"#7adfe8",cursor:"pointer",fontWeight:"bold"}}>{"💎 "}{fmt(mC)}</span>
+                <span onClick={()=>{AudioEngine.safeSoftClick&&AudioEngine.safeSoftClick();setSelResource("deut");}} style={{color:wD||"#9adda0",cursor:"pointer",fontWeight:"bold"}}>{"⚗️ "}{fmt(mD)}</span>
+                <span onClick={()=>{AudioEngine.safeSoftClick&&AudioEngine.safeSoftClick();setSelResource("energy");}} style={{color:eCol,cursor:"pointer",fontWeight:"bold"}}>{"⚡ "}{Math.round(r*100)+"%"}</span>
+              </div>
+            );
+          })()}
+        </div>
+      </div>}
+      <div style={{flex:1,overflow:"hidden",display:"flex",flexDirection:"column"}}>
+        {tab==="galaxy"&&(
+          <div style={galaxyFS?{position:"fixed",top:0,left:0,right:0,bottom:0,zIndex:200,background:"#000005"}:{flex:1,overflow:"hidden",position:"relative"}}>
+            {threeOk?<GalaxyMap3D planets={planets} playerIdx={idx} myColonyIndices={(loadGS(user.id)||{}).empire||[]} onSelect={pick} gSeed={gSeed}/>
+              :<div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100%",color:"#1e3050",fontSize:11,fontFamily:"monospace"}}>Chargement...</div>
+            }
+            <button onClick={()=>setGalaxyFS(f=>!f)} style={{position:"absolute",top:10,right:"calc(10px + "+safeR+")",padding:"5px 9px",background:"rgba(8,14,24,0.85)",border:"1px solid #1a3050",borderRadius:6,color:"#9abcd8",fontSize:11,cursor:"pointer",zIndex:10,backdropFilter:"blur(4px)"}}>{galaxyFS?"✕":"⛶"}</button>
+            <button onClick={()=>{AudioEngine.safeClick&&AudioEngine.safeClick();setExplorationMode(true);}} style={{position:"absolute",bottom:12,left:"calc(110px + env(safe-area-inset-left,0px))",padding:"5px 11px",background:"linear-gradient(135deg,rgba(40,80,140,0.85),rgba(20,40,80,0.85))",border:"1px solid #4488cc",borderRadius:6,color:"#c8e0ff",fontSize:10,cursor:"pointer",zIndex:10,backdropFilter:"blur(4px)",fontFamily:"monospace",fontWeight:"bold",letterSpacing:1}}>{"🚀 EXPLORER"}</button>
+            <div style={{position:"absolute",bottom:6,left:0,right:0,textAlign:"center",fontSize:8,color:"#1a2a3a",pointerEvents:"none"}}>GLISSER · 2 DOIGTS POUR DÉPLACER · CLIQUER</div>
+          </div>
+        )}
+        {tab==="players"&&(
+          <PlayersPanel user={user} planets={planets} lp={lp} idx={idx} myState={myState} activePlanetIdx={activePlanetIdx} onPick={pick} gSeed={gSeed}/>
+        )}
+        {tab==="missions"&&myState&&(
+          <MissionsModal state={activePlanetIdx===null?myState:loadGS(user.id)} onClaim={handleClaimMission} onClose={()=>setTab("galaxy")} inline={true} onScroll={handleInlineScroll}/>
+        )}
+        {tab==="empire"&&(()=>{
+          const natSt=loadGS(user.id);
+          const empCount=(natSt&&natSt.empire&&natSt.empire.length)||0;
+          if(empCount===0){
+            // Should not happen since the dock button only shows if empire>0, but safe fallback
+            return(<div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",color:"#5a7aa0",fontFamily:"monospace",fontSize:11,letterSpacing:1.5}}>{"Aucune colonie pour l'instant."}</div>);
+          }
+          return(
+            <EmpireModal userId={user.id} planets={planets} natalIdx={idx} activePlanetIdx={activePlanetIdx} onSwitch={newIdx=>{setActivePlanetIdx(newIdx);setTab("galaxy");}} onClose={()=>setTab("galaxy")} inline={true} onScroll={handleInlineScroll}/>
+          );
+        })()}
+      </div>
+      {/* Floating bottom dock — circular icons in a translucent pill */}
+      <div style={{position:"absolute",bottom:"calc(14px + env(safe-area-inset-bottom,0px))",left:0,right:0,zIndex:20,display:"flex",justifyContent:"center",pointerEvents:"none",opacity:dockVisible?1:0,transform:"translateY("+(dockVisible?"0":"30px")+")",transition:"opacity 0.25s ease-out, transform 0.25s ease-out"}}>
+        <div style={Object.assign({display:"flex",gap:6,padding:"7px 11px",background:tab==="galaxy"||tab==="players"?"rgba(6,12,24,0.6)":"rgba(6,12,24,0.95)",border:"1px solid rgba(60,100,160,0.3)",borderRadius:32,boxShadow:"0 4px 20px rgba(0,10,40,0.5)",pointerEvents:"auto"},(tab==="galaxy"||tab==="players")?{backdropFilter:"blur(14px)",WebkitBackdropFilter:"blur(14px)"}:{})}>
+          {(()=>{
+            const natSt=activePlanetIdx===null?myState:loadGS(user.id);
+            const activeMissions=natSt?getActiveMissions(natSt):[];
+            const readyCount=activeMissions.filter(m=>!m._locked&&m.check(natSt)).length;
+            const empCount=(natSt&&natSt.empire&&natSt.empire.length)||0;
+            const dockBtn=(opts)=>{
+              const{icon,label,active,onClick,badge,badgeColor}=opts;
+              return(
+                <button onClick={onClick} style={{position:"relative",width:46,height:46,borderRadius:"50%",border:"1px solid "+(active?"rgba(120,180,240,0.6)":"rgba(60,90,140,0.25)"),background:active?"linear-gradient(135deg,rgba(60,120,200,0.4),rgba(30,80,160,0.3))":"transparent",color:active?"#c8e8ff":"#7090b8",fontSize:18,cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",fontFamily:"monospace",transition:"all 0.15s",boxShadow:active?"0 0 12px rgba(80,140,240,0.4)":"none"}} title={label}>
+                  <span style={{lineHeight:1}}>{icon}</span>
+                  {badge>0&&<span style={{position:"absolute",top:-2,right:-2,minWidth:16,height:16,padding:"0 4px",background:badgeColor||"#44aa66",color:"#fff",fontSize:8,fontWeight:"bold",borderRadius:8,display:"flex",alignItems:"center",justifyContent:"center",boxShadow:"0 0 6px "+(badgeColor||"rgba(68,170,102,0.9)")}}>{badge}</span>}
+                </button>
+              );
+            };
+            return(<div style={{display:"flex",gap:4,alignItems:"center"}}>
+              {dockBtn({icon:"🌌",label:"Galaxie",active:tab==="galaxy",onClick:()=>{AudioEngine.safeSoftClick&&AudioEngine.safeSoftClick();setTab("galaxy");}})}
+              {dockBtn({icon:activePlanetIdx!==null?"🌱":"🪐",label:"Planète",onClick:()=>{AudioEngine.safeClick();setViewer(mine);}})}
+              {dockBtn({icon:"👥",label:"Joueurs",active:tab==="players",onClick:()=>{AudioEngine.safeSoftClick&&AudioEngine.safeSoftClick();setTab("players");}})}
+              {empCount>0&&dockBtn({icon:"🏛️",label:"Empire",active:tab==="empire",onClick:()=>{AudioEngine.safeSoftClick&&AudioEngine.safeSoftClick();setTab("empire");},badge:empCount+1,badgeColor:"#3a7ac0"})}
+              {dockBtn({icon:"📋",label:"Missions",active:tab==="missions",onClick:()=>{AudioEngine.safeSoftClick&&AudioEngine.safeSoftClick();setTab("missions");},badge:readyCount,badgeColor:"#44aa66"})}
+            </div>);
+          })()}
+        </div>
+      </div>
+      {myState&&myState.needsQGPlacement&&(
+        <QGPlacementModal state={myState} planet={mine} onPlace={handleQGPlacement}/>
+      )}
+    </div>
+  );
+}
+// ── AUDIO CONTROLS WIDGET ──
+function AudioControls({onLogout}){
+  const[muted,setMuted]=useState(false);
+  const[showPanel,setShowPanel]=useState(false);
+  const[musicVol,setMusicVol]=useState(0.35);
+  const[sfxVol,setSfxVol]=useState(0.6);
+  const[started,setStarted]=useState(false);
+
+  const startAudio=()=>{
+    if(!started){
+      AudioEngine.init();
+      AudioEngine.startMusic();
+      setStarted(true);
+    }
+  };
+  // Auto-start music on first user interaction anywhere in the app
+  useEffect(()=>{
+    if(started)return;
+    const autoStart=()=>{
+      if(!started){
+        AudioEngine.init();
+        AudioEngine.startMusic();
+        setStarted(true);
+      }
+    };
+    const opts={once:true,capture:true};
+    document.addEventListener("click",autoStart,opts);
+    document.addEventListener("touchstart",autoStart,opts);
+    document.addEventListener("keydown",autoStart,opts);
+    return()=>{
+      document.removeEventListener("click",autoStart,opts);
+      document.removeEventListener("touchstart",autoStart,opts);
+      document.removeEventListener("keydown",autoStart,opts);
+    };
+  },[started]);
+  const toggleMute=()=>{
+    startAudio();
+    const nm=!muted;
+    setMuted(nm);
+    AudioEngine.setMuted(nm);
+    AudioEngine.resume();
+  };
+  const handleMusic=v=>{startAudio();setMusicVol(v);AudioEngine.setMusicVol(v);};
+  const handleSfx=v=>{startAudio();setSfxVol(v);AudioEngine.setSfxVol(v);};
+
+  const _rs4={position:"fixed",bottom:16,right:"calc(16px + env(safe-area-inset-right,0px))",zIndex:9000,display:"flex",flexDirection:"column-reverse",alignItems:"flex-end",gap:8,pointerEvents:"all"};
+  return(<div style={_rs4}>
+      {showPanel&&(
+        <div style={{background:"rgba(4,10,24,.98)",border:"1px solid #1a3a60",borderRadius:14,padding:"14px 16px",width:220,boxShadow:"0 0 30px rgba(0,10,50,.9)"}}>
+          <div style={{fontSize:9,color:"#3a6a9a",letterSpacing:2,marginBottom:12,fontFamily:"monospace"}}>{"AUDIO"}</div>
+          {!started&&<div style={{fontSize:9,color:"#cc8844",fontFamily:"monospace",marginBottom:10,padding:"6px 8px",background:"rgba(80,40,0,.3)",borderRadius:6,border:"1px solid #3a2010"}}>{"Bouge un slider pour activer"}</div>}
+          <div style={{marginBottom:12}}>
+            <div style={{fontSize:9,color:"#5588aa",fontFamily:"monospace",marginBottom:6}}>{"🎵 Musique"}</div>
+            <input type="range" min="0" max="1" step="0.05" value={musicVol}
+              onChange={e=>handleMusic(parseFloat(e.target.value))}
+              style={{width:"100%",accentColor:"#3366cc",cursor:"pointer",height:4}}/>
+            <div style={{fontSize:8,color:"#2a4060",fontFamily:"monospace",textAlign:"right",marginTop:2}}>{Math.round(musicVol*100)+"%"}</div>
+          </div>
+          <div style={{marginBottom:12}}>
+            <div style={{fontSize:9,color:"#5588aa",fontFamily:"monospace",marginBottom:6}}>{"🔊 Effets"}</div>
+            <input type="range" min="0" max="1" step="0.05" value={sfxVol}
+              onChange={e=>handleSfx(parseFloat(e.target.value))}
+              style={{width:"100%",accentColor:"#3366cc",cursor:"pointer",height:4}}/>
+            <div style={{fontSize:8,color:"#2a4060",fontFamily:"monospace",textAlign:"right",marginTop:2}}>{Math.round(sfxVol*100)+"%"}</div>
+          </div>
+          <button onClick={toggleMute} style={{width:"100%",padding:"8px 0",borderRadius:6,border:"1px solid "+(muted?"#662222":"#1a3a60"),background:muted?"rgba(60,15,15,.6)":"rgba(20,40,80,.5)",color:muted?"#ff7070":"#9abcd8",fontSize:10,fontFamily:"monospace",letterSpacing:1.5,fontWeight:"bold",cursor:"pointer"}}>
+            {muted?"🔇 RÉACTIVER LE SON":"🔊 COUPER LE SON"}
+          </button>
+          {onLogout&&(
+            <div style={{marginTop:14,paddingTop:12,borderTop:"1px dashed rgba(80,40,40,0.3)"}}>
+              <button onClick={()=>{setShowPanel(false);onLogout();}} style={{width:"100%",padding:"8px 0",borderRadius:6,border:"1px solid rgba(140,60,60,0.4)",background:"rgba(40,15,15,0.4)",color:"#cc8080",fontSize:10,fontFamily:"monospace",letterSpacing:1.5,fontWeight:"bold",cursor:"pointer"}}>
+                {"⏏ DÉCONNEXION"}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+      <button
+        onClick={()=>{setShowPanel(p=>!p);}}
+        style={{width:40,height:40,borderRadius:"50%",border:"1px solid "+(muted?"#662222":"#1a3050"),background:muted?"rgba(40,10,10,.95)":"rgba(6,14,28,.95)",color:muted?"#ff7070":"#4a7aaa",fontSize:17,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",boxShadow:"0 0 10px rgba(0,10,40,.8)"}}>
+        {muted?"🔇":"⚙️"}
+      </button>
+    </div>
+  );
+}
+
+export default function App(){
+  const[user,setUser]=useState(null),[ready,setReady]=useState(false);
+  useEffect(()=>{
+    // Audio initialized by AudioControls on first user click
+    const s=document.createElement("style");
+    s.textContent="@media(orientation:portrait){#portrait-lock{display:flex!important;}}@media(orientation:landscape){#portrait-lock{display:none!important;}}@keyframes fadeIn{from{opacity:0}to{opacity:1}}@keyframes twinkle{0%,100%{opacity:.2}50%{opacity:.8}}@keyframes pulse{0%,100%{box-shadow:0 0 12px rgba(68,255,170,.4)}50%{box-shadow:0 0 24px rgba(68,255,170,.9)}}@keyframes avatarPulse{0%,100%{transform:scale(1)}50%{transform:scale(1.08)}}@keyframes avatarSpin{from{filter:hue-rotate(0deg)}to{filter:hue-rotate(360deg)}}@keyframes avatarScan{0%{background-position:0 -100%}100%{background-position:0 200%}}@keyframes avatarBorderGlow{0%,100%{box-shadow:0 0 6px currentColor}50%{box-shadow:0 0 18px currentColor,0 0 32px currentColor}}@keyframes avatarAuraRing{0%,100%{box-shadow:0 0 10px currentColor,0 0 20px currentColor}50%{box-shadow:0 0 22px currentColor,0 0 42px currentColor,0 0 60px currentColor}}*{box-sizing:border-box;margin:0;padding:0;-webkit-text-size-adjust:100%;-webkit-touch-callout:none}html,body{background:#000005;height:100%;overflow:hidden;touch-action:manipulation;-webkit-user-select:none;user-select:none}canvas{touch-action:none}input,textarea{-webkit-user-select:text;user-select:text}::-webkit-scrollbar{width:3px;height:3px}::-webkit-scrollbar-thumb{background:#0d2035;border-radius:2px}input,button{-webkit-tap-highlight-color:transparent;}@import url(https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap);";
+    document.head.appendChild(s);
+    let vm=document.querySelector('meta[name=viewport]');
+    if(!vm){vm=document.createElement('meta');vm.name='viewport';document.head.appendChild(vm);}
+    // First allow zoom briefly, then lock — this forces iOS to reset any existing zoom state
+    vm.content='width=device-width,initial-scale=1,maximum-scale=10,user-scalable=yes,viewport-fit=cover';
+    // Force layout recalc then lock zoom
+    setTimeout(()=>{
+      vm.content='width=device-width,initial-scale=1,maximum-scale=1,minimum-scale=1,user-scalable=no,viewport-fit=cover';
+      // Scroll to top-left to ensure page is properly positioned
+      window.scrollTo(0,0);
+    },50);
+    // iOS Safari: prevent gesture-based zoom (pinch) on the document body
+    const preventGesture=e=>e.preventDefault();
+    document.addEventListener('gesturestart',preventGesture);
+    document.addEventListener('gesturechange',preventGesture);
+    document.addEventListener('gestureend',preventGesture);
+    const sv=Auth.loadSession();if(sv&&sv.id)setUser(sv);setReady(true);
+    return()=>{
+      document.head.removeChild(s);
+      document.removeEventListener('gesturestart',preventGesture);
+      document.removeEventListener('gesturechange',preventGesture);
+      document.removeEventListener('gestureend',preventGesture);
+    };
+  },[]);
+  // Note: zoom reset on auth transitions is handled by forcing a page reload
+  // in the main component (see bottom of App). This is the only reliable way on iOS.
+  // Detect residual zoom after auth transitions and correct it by measuring actual viewport.
+  // iOS sometimes keeps a scale ratio that makes the body wider than the screen.
+  useEffect(()=>{
+    if(!user)return;
+    let tries=0;
+    const correct=()=>{
+      tries++;
+      // If the document appears wider than the viewport, we have a residual zoom
+      const vw=window.innerWidth;
+      const bw=document.documentElement.scrollWidth||document.body.scrollWidth;
+      if(bw>vw*1.05){
+        // Kill any CSS transform that might cause this
+        document.body.style.transform="";
+        document.documentElement.style.zoom="1";
+        document.body.style.zoom="1";
+        // Re-apply viewport meta forcefully
+        document.querySelectorAll('meta[name=viewport]').forEach(v=>v.remove());
+        const nm=document.createElement('meta');
+        nm.name='viewport';
+        nm.content='width=device-width,initial-scale=1,maximum-scale=1,minimum-scale=1,user-scalable=no,viewport-fit=cover';
+        document.head.appendChild(nm);
+        window.scrollTo(0,0);
+      }
+      if(tries<5)setTimeout(correct,200);
+    };
+    correct();
+  },[user]);
+  if(!ready)return <div style={{minHeight:"100svh",height:"100dvh",background:"#000005",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"monospace",color:"#1e3050",fontSize:10,letterSpacing:3}}>INIT...</div>;
+  return(<>
+      <div id="portrait-lock" style={{display:"none",position:"fixed",top:0,left:0,right:0,bottom:0,zIndex:9999,background:"#000005",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:16}}>
+        <div style={{fontSize:48}}>{"🔄"}</div>
+        <div style={{color:"#77aadd",fontFamily:"monospace",fontSize:14,textAlign:"center",padding:"0 24px"}}>{"Tourne ton téléphone"}</div>
+        <div style={{color:"#2a4a6a",fontFamily:"monospace",fontSize:10,textAlign:"center"}}>{"Galaxia se joue en mode paysage"}</div>
+      </div>
+      {!user?<AScreen onAuth={u=>setUser(u)}/>:<><Dash user={user} onOut={()=>setUser(null)}/><AudioControls onLogout={()=>{Auth.clearSession();setUser(null);}}/></>}
+    </>
+  );
+}
