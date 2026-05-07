@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Galaxia — Sauvetage v3 (TOUTES SAVES)</title>
+<style>
+body{font-family:monospace;background:#0a0612;color:#d8b8ff;padding:14px;margin:0;line-height:1.5;font-size:14px;}
+h1{color:#fff;font-size:17px;border-bottom:1px solid #6644aa;padding-bottom:6px;margin-top:0;}
+h2{color:#aa88ee;font-size:14px;margin-top:18px;border-bottom:1px solid #4a3070;padding-bottom:4px;}
+button{background:linear-gradient(135deg,#5034a0,#3a2480);color:#fff;border:1px solid #aa66ff;padding:11px 14px;font-size:13px;border-radius:7px;cursor:pointer;font-family:monospace;font-weight:bold;width:100%;margin:6px 0;}
+button.green{background:linear-gradient(135deg,#3a8050,#205030);border-color:#66cc88;}
+button.orange{background:linear-gradient(135deg,#a06030,#603018);border-color:#ee9955;}
+button.red{background:linear-gradient(135deg,#803040,#502020);border-color:#cc6666;}
+button.player{background:linear-gradient(135deg,#3a5080,#205070);border-color:#66aacc;border-width:2px;}
+.box{background:rgba(40,25,70,0.5);border:1px solid #6644aa;border-radius:6px;padding:10px;margin:10px 0;font-size:12px;}
+.warn{background:rgba(80,40,40,0.5);border-color:#cc6666;color:#ffaabb;}
+.ok{background:rgba(40,80,50,0.5);border-color:#66cc88;color:#b8ffcc;}
+.info{background:rgba(40,50,80,0.5);border-color:#6688cc;color:#aaccff;}
+pre{background:#1a0e2a;color:#bbaadd;border:1px solid #4a3070;border-radius:4px;padding:8px;font-size:11px;overflow:auto;max-height:300px;white-space:pre-wrap;word-break:break-word;}
+.key-item{background:rgba(40,25,70,0.5);border:1px solid #4a3070;border-radius:4px;padding:8px;margin:4px 0;font-size:11px;cursor:pointer;}
+.key-item:hover{background:rgba(60,40,90,0.7);}
+.key-player{border-color:#66aacc;background:rgba(40,60,100,0.5);}
+</style>
+</head>
+<body>
+<h1>🛟 GALAXIA — Sauvetage v3</h1>
+<div id="status"></div>
+
+<h2>📋 Toutes les saves détectées</h2>
+<button onclick="listAllSaves()">🔍 LISTER TOUTES LES SAVES</button>
+<div id="savesList"></div>
+
+<h2>🎯 Réparation ciblée</h2>
+<div id="selectedSave"></div>
+<button class="green" onclick="repairSelected()" id="repairBtn" style="display:none">🔧 RÉPARER LA SAVE SÉLECTIONNÉE</button>
+
+<h2>📤 Sauvegarde</h2>
+<button onclick="downloadAllSaves()">💾 TÉLÉCHARGER TOUTES LES SAVES (.json)</button>
+
+<h2>👁️ Inspecter</h2>
+<div id="inspect"></div>
+
+<script>
+var selectedKey=null;
+
+function setStatus(msg,kind){document.getElementById("status").innerHTML='<div class="box '+(kind||"info")+'">'+msg+'</div>';}
+
+function listAllSaves(){
+  var allKeys=[];
+  for(var i=0;i<localStorage.length;i++){
+    var k=localStorage.key(i);
+    if(k)allKeys.push(k);
+  }
+  var html='<div class="info box">📊 '+allKeys.length+' clé(s) trouvée(s) au total</div>';
+  if(allKeys.length===0){
+    setStatus("Aucune donnée. Tu n'es probablement pas sur le bon domaine.","warn");
+    return;
+  }
+  html+='<div style="font-size:11px;color:#aa88cc;margin:6px 0">Tape sur une clé pour la sélectionner :</div>';
+  // Sort: state keys first, then others
+  allKeys.sort(function(a,b){
+    var aIsState=a.indexOf("gx_state_")===0;
+    var bIsState=b.indexOf("gx_state_")===0;
+    if(aIsState!==bIsState)return aIsState?-1:1;
+    return a.localeCompare(b);
+  });
+  for(var j=0;j<allKeys.length;j++){
+    var key=allKeys[j];
+    var val=localStorage.getItem(key)||"";
+    var preview=val.length>80?val.substring(0,80)+"...":val;
+    var sizeKb=(val.length/1024).toFixed(1);
+    var isPlayer=key.indexOf("gx_state_")===0&&key.indexOf("bot_")===-1;
+    var classes="key-item"+(isPlayer?" key-player":"");
+    var label=isPlayer?"🎮 PROBABLE JOUEUR : ":"";
+    html+='<div class="'+classes+'" onclick="selectKey(\\''+key+'\\')">'
+      +'<div><b>'+label+key+'</b> ('+sizeKb+' KB)</div>'
+      +'<div style="color:#7a6aa0;font-size:9px;margin-top:3px">'+escapeHtml(preview)+'</div>'
+      +'</div>';
+  }
+  document.getElementById("savesList").innerHTML=html;
+  setStatus("✅ Toutes les saves listées. Tape sur celle qui te concerne (probablement marquée 🎮)","ok");
+}
+
+function escapeHtml(s){return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}
+
+function selectKey(key){
+  selectedKey=key;
+  var val=localStorage.getItem(key);
+  document.getElementById("selectedSave").innerHTML='<div class="info box"><b>Sélectionnée : '+key+'</b></div>';
+  document.getElementById("repairBtn").style.display="block";
+  // Try to inspect
+  try{
+    var s=JSON.parse(val);
+    var summary={
+      resources:s.resources,
+      ships:s.ships,
+      buildings:s.buildings,
+      tech:s.tech,
+      missionFlags:s.missionFlags,
+      activeMission:s.activeMission,
+      fleetsCount:(s.fleets&&s.fleets.length)||0,
+      anomaliesCount:(s.anomalies&&s.anomalies.length)||0,
+      queue:s.queue,
+      lastTick:s.lastTick?new Date(s.lastTick).toLocaleString():null
+    };
+    document.getElementById("inspect").innerHTML='<div class="box"><b>Aperçu de la save :</b><pre>'+JSON.stringify(summary,null,2)+'</pre></div>';
+  }catch(e){
+    document.getElementById("inspect").innerHTML='<div class="warn box">Impossible de parser cette save : '+e.message+'</div>';
+  }
+}
+
+function repairSelected(){
+  if(!selectedKey){alert("Aucune save sélectionnée");return;}
+  if(!confirm("Va appliquer une réparation sur "+selectedKey+". Continuer ?"))return;
+  try{
+    var s=JSON.parse(localStorage.getItem(selectedKey));
+    var fixed=[];
+    
+    // Fix ships — remove cargos with weird values, ensure all ships are valid numbers
+    if(!s.ships||typeof s.ships!=="object"){s.ships={};fixed.push("ships object recréé");}
+    var shipKeys=Object.keys(s.ships);
+    for(var i=0;i<shipKeys.length;i++){
+      var k=shipKeys[i];
+      var v=s.ships[k];
+      if(typeof v!=="number"||isNaN(v)||!isFinite(v)||v<0){
+        s.ships[k]=0;
+        fixed.push("ships."+k+" remis à 0 (était "+JSON.stringify(v)+")");
+      } else if(v>1e9){
+        s.ships[k]=1000;
+        fixed.push("ships."+k+" capé à 1000 (était "+v+")");
+      }
+    }
+    
+    // Fix resources
+    if(!s.resources)s.resources={metal:0,crystal:0,deut:0};
+    var rk=["metal","crystal","deut"];
+    for(var j=0;j<rk.length;j++){
+      var rv=s.resources[rk[j]];
+      if(typeof rv!=="number"||isNaN(rv)||!isFinite(rv)||rv<0){
+        s.resources[rk[j]]=0;
+        fixed.push("resources."+rk[j]+" remis à 0 (était "+JSON.stringify(rv)+")");
+      }
+    }
+    
+    // Fix queue
+    if(s.queue&&(typeof s.queue!=="object"||typeof s.queue.finishAt!=="number")){
+      s.queue=null;
+      fixed.push("queue cassée nettoyée");
+    }
+    
+    // Fix research queue
+    if(s.researchQueue&&(typeof s.researchQueue!=="object"||typeof s.researchQueue.finishAt!=="number")){
+      s.researchQueue=null;
+      fixed.push("researchQueue cassée nettoyée");
+    }
+    
+    // Clean fleets — remove malformed
+    if(s.fleets&&Array.isArray(s.fleets)){
+      var origFleetCount=s.fleets.length;
+      s.fleets=s.fleets.filter(function(f){
+        return f&&typeof f==="object"&&f.id&&typeof f.arriveAt==="number"&&typeof f.departAt==="number"&&!isNaN(f.arriveAt)&&!isNaN(f.departAt);
+      });
+      if(s.fleets.length!==origFleetCount)fixed.push((origFleetCount-s.fleets.length)+" flotte(s) cassée(s) supprimée(s)");
+    } else { s.fleets=[]; }
+    
+    // Clean anomalies
+    if(s.anomalies&&Array.isArray(s.anomalies)){
+      var origAnomCount=s.anomalies.length;
+      s.anomalies=s.anomalies.filter(function(a){
+        return a&&a.id&&a.pos&&typeof a.pos.x==="number"&&typeof a.pos.y==="number"&&typeof a.pos.z==="number"&&typeof a.expiresAt==="number";
+      });
+      if(s.anomalies.length!==origAnomCount)fixed.push((origAnomCount-s.anomalies.length)+" anomalie(s) cassée(s) supprimée(s)");
+    } else { s.anomalies=[]; }
+    
+    // Clean notifs and boosts
+    s.anomalyNotifs=[];
+    s.activeBoosts=[];
+    s.pendingTechCredits=s.pendingTechCredits||0;
+    
+    // Reset lastTick
+    s.lastTick=Date.now();
+    fixed.push("lastTick reset à maintenant");
+    
+    // Save back
+    localStorage.setItem(selectedKey,JSON.stringify(s));
+    
+    var msg="✅ Réparation appliquée sur "+selectedKey+"<br><br><b>"+fixed.length+" opération(s) :</b><br>"+fixed.map(function(f){return "• "+f;}).join("<br>");
+    setStatus(msg,"ok");
+    selectKey(selectedKey); // Refresh inspect
+  }catch(e){
+    setStatus("Erreur : "+e.message,"warn");
+  }
+}
+
+function downloadAllSaves(){
+  var all={};
+  for(var i=0;i<localStorage.length;i++){
+    var k=localStorage.key(i);
+    if(k)all[k]=localStorage.getItem(k);
+  }
+  var blob=new Blob([JSON.stringify(all,null,2)],{type:"application/json"});
+  var url=URL.createObjectURL(blob);
+  var a=document.createElement("a");
+  a.href=url;a.download="galaxia-all-saves-"+Date.now()+".json";a.click();
+  URL.revokeObjectURL(url);
+  setStatus("✅ Téléchargement lancé","ok");
+}
+
+window.addEventListener("load",function(){
+  setStatus("Tape sur 🔍 LISTER TOUTES LES SAVES pour commencer","info");
+});
+</script>
+</body>
+</html>
