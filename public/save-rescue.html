@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Galaxia — Sauvetage de save</title>
+<style>
+body{font-family:monospace;background:#0a0612;color:#d8b8ff;padding:16px;margin:0;line-height:1.5;}
+h1{color:#fff;font-size:18px;border-bottom:1px solid #6644aa;padding-bottom:8px;}
+button{background:linear-gradient(135deg,#5034a0,#3a2480);color:#fff;border:1px solid #aa66ff;padding:14px 20px;font-size:14px;border-radius:8px;cursor:pointer;font-family:monospace;font-weight:bold;width:100%;margin:10px 0;}
+button.green{background:linear-gradient(135deg,#3a8050,#205030);border-color:#66cc88;}
+button.red{background:linear-gradient(135deg,#803040,#502020);border-color:#cc6666;}
+textarea{width:100%;height:300px;background:#1a0e2a;color:#d8b8ff;border:1px solid #6644aa;border-radius:6px;padding:8px;font-family:monospace;font-size:11px;}
+.box{background:rgba(40,25,70,0.5);border:1px solid #6644aa;border-radius:8px;padding:12px;margin:12px 0;}
+.warn{background:rgba(80,40,40,0.5);border-color:#cc6666;color:#ffaabb;}
+.ok{background:rgba(40,80,50,0.5);border-color:#66cc88;color:#b8ffcc;}
+</style>
+</head>
+<body>
+<h1>🛟 GALAXIA — Sauvetage de save</h1>
+<div class="box">
+  <p>Cette page lit ton localStorage Galaxia. Elle ne touche à rien tant que tu ne cliques pas sur les boutons.</p>
+</div>
+<div id="status"></div>
+
+<button onclick="showSave()">📋 AFFICHER MA SAVE</button>
+<button onclick="copySave()">📤 COPIER MA SAVE</button>
+<button class="green" onclick="autoFix()">🔧 RÉPARATION AUTO</button>
+<button class="red" onclick="resetAll()">🗑️ TOUT EFFACER (dernier recours)</button>
+
+<textarea id="output" placeholder="La save apparaîtra ici"></textarea>
+
+<script>
+function getKeys(){
+  var keys=[];
+  for(var i=0;i<localStorage.length;i++){
+    var k=localStorage.key(i);
+    if(k&&k.indexOf("gx_")===0)keys.push(k);
+  }
+  return keys;
+}
+function getSave(){
+  var keys=getKeys();
+  var save={};
+  for(var i=0;i<keys.length;i++){
+    save[keys[i]]=localStorage.getItem(keys[i]);
+  }
+  return save;
+}
+function setStatus(msg,kind){
+  var el=document.getElementById("status");
+  el.innerHTML='<div class="box '+(kind||"")+'">'+msg+'</div>';
+}
+function showSave(){
+  try{
+    var save=getSave();
+    var keys=Object.keys(save);
+    if(keys.length===0){setStatus("Aucune save Galaxia trouvée. Tu n'es probablement pas sur le bon domaine.","warn");return;}
+    document.getElementById("output").value=JSON.stringify(save,null,2);
+    setStatus("Save trouvée ! "+keys.length+" clés. Sélectionne le texte ci-dessous et copie-le.","ok");
+  }catch(e){setStatus("Erreur : "+e.message,"warn");}
+}
+function copySave(){
+  try{
+    var save=getSave();
+    var text=JSON.stringify(save);
+    document.getElementById("output").value=text;
+    if(navigator.clipboard){
+      navigator.clipboard.writeText(text).then(function(){
+        setStatus("✅ Copié dans le presse-papier !","ok");
+      }).catch(function(){
+        setStatus("Copie auto échouée. Sélectionne et copie manuellement le texte ci-dessous.","warn");
+      });
+    } else {
+      var ta=document.getElementById("output");
+      ta.select();
+      try{document.execCommand("copy");setStatus("✅ Copié !","ok");}catch(e){setStatus("Sélectionne et copie manuellement","warn");}
+    }
+  }catch(e){setStatus("Erreur : "+e.message,"warn");}
+}
+function autoFix(){
+  if(!confirm("Appliquer la réparation auto ? Ça nettoie les flottes/anomalies/queues corrompues mais garde tes ressources et bâtiments."))return;
+  try{
+    var keys=getKeys();
+    var fixedCount=0;
+    for(var i=0;i<keys.length;i++){
+      var k=keys[i];
+      // Only fix gx_state_* keys (player state)
+      if(k.indexOf("gx_state_")!==0)continue;
+      try{
+        var s=JSON.parse(localStorage.getItem(k));
+        if(!s||typeof s!=="object")continue;
+        // Clear queue if corrupted
+        if(s.queue&&(typeof s.queue!=="object"||!s.queue.finishAt))s.queue=null;
+        // Clean fleets
+        if(s.fleets&&Array.isArray(s.fleets)){
+          s.fleets=s.fleets.filter(function(f){
+            return f&&typeof f==="object"&&f.id&&typeof f.arriveAt==="number"&&typeof f.departAt==="number";
+          });
+        } else { s.fleets=[]; }
+        // Ensure ships valid
+        if(!s.ships||typeof s.ships!=="object")s.ships={};
+        var sk=Object.keys(s.ships);
+        for(var j=0;j<sk.length;j++){
+          var v=s.ships[sk[j]];
+          if(typeof v!=="number"||isNaN(v)||v<0)s.ships[sk[j]]=0;
+        }
+        // Ensure resources valid
+        if(!s.resources)s.resources={metal:0,crystal:0,deut:0};
+        var rk=["metal","crystal","deut"];
+        for(var l=0;l<rk.length;l++){
+          if(typeof s.resources[rk[l]]!=="number"||isNaN(s.resources[rk[l]]))s.resources[rk[l]]=0;
+        }
+        // Clean anomalies
+        if(s.anomalies&&Array.isArray(s.anomalies)){
+          s.anomalies=s.anomalies.filter(function(a){
+            return a&&a.id&&a.pos&&typeof a.expiresAt==="number";
+          });
+        } else { s.anomalies=[]; }
+        // Reset notif buffer
+        s.anomalyNotifs=[];
+        // Reset lastTick
+        s.lastTick=Date.now();
+        // Save back
+        localStorage.setItem(k,JSON.stringify(s));
+        fixedCount++;
+      }catch(e){
+        // If a state is totally corrupted JSON, leave it alone
+        console.error("Failed to fix",k,e);
+      }
+    }
+    setStatus("✅ "+fixedCount+" save(s) réparée(s). Retourne sur https://galaxia-4kz1.vercel.app pour tester.","ok");
+  }catch(e){setStatus("Erreur : "+e.message,"warn");}
+}
+function resetAll(){
+  if(!confirm("ATTENTION : ceci va EFFACER TOUTES tes données Galaxia (compte, planètes, ressources). Sûr ?"))return;
+  if(!confirm("Vraiment sûr ? C'est IRREVERSIBLE."))return;
+  var keys=getKeys();
+  for(var i=0;i<keys.length;i++)localStorage.removeItem(keys[i]);
+  setStatus("Toutes les données Galaxia ont été effacées.","warn");
+}
+// Auto-detect on load
+window.addEventListener("load",function(){
+  var keys=getKeys();
+  if(keys.length===0){
+    setStatus("⚠️ Aucune donnée Galaxia détectée sur ce domaine. Vérifie que tu es bien sur galaxia-4kz1.vercel.app","warn");
+  } else {
+    setStatus("✅ "+keys.length+" clé(s) Galaxia détectée(s). Choisis une action ci-dessus.","ok");
+  }
+});
+</script>
+</body>
+</html>
